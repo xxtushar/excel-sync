@@ -1,0 +1,8 @@
+node_modules/
+.env
+*.log
+~$*.xlsx
+.DS_Store
+
+# Your live working workbook (WATCH_FILE). The reference copy is test/fixtures/pgdump1.xlsx.
+/avyra.xlsx
