@@ -45,7 +45,7 @@ async function createExcelSync(opts = {}) {
     engine,
     pool,
     startWatcher(wopts = {}) {
-      const file = wopts.file || config.watchFile;
+      const file = wopts.file ? config.resolvePath(wopts.file) : config.watchFile;
       if (!file) throw new Error('No file to watch: set WATCH_FILE or pass { file }.');
       watcher = createWatcher(engine, { ...wopts, file });
       watcher.start(wopts);

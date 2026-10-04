@@ -12,6 +12,7 @@
  *  tables=a,b, details=true|false
  */
 
+const fs = require('fs');
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
@@ -61,9 +62,10 @@ function createSyncRouter({ engine, pool, getWatcher }) {
   router.post('/sync', upload.single('file'), (req, res) => handle(req, res, false));
 
   router.post('/sync/watched-file', async (req, res) => {
-    if (!config.watchFile) throw new HttpError(400, 'WATCH_FILE is not set on the server.');
+    if (!fs.existsSync(config.watchFile))
+      throw new HttpError(404, `No workbook at ${config.displayPath(config.watchFile)} on the server. Set WATCH_FILE in .env.`);
     const o = syncOptions(req);
-    const result = await engine.runSync({ ...o, source: config.watchFile, sourceName: config.watchFile, dryRun: truthy(req.query.dryRun), trigger: 'api' });
+    const result = await engine.runSync({ ...o, source: config.watchFile, sourceName: config.displayPath(config.watchFile), dryRun: truthy(req.query.dryRun), trigger: 'api' });
     res.status(HTTP_STATUS[result.status] || 200).json(toResponse(result, { details: o.details }));
   });
 

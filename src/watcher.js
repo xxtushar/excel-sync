@@ -13,7 +13,8 @@ const config = require('./config');
 const { printResult } = require('./sync/report');
 
 function createWatcher(engine, opts = {}) {
-  const file = path.resolve(opts.file || config.watchFile);
+  const file = opts.file ? config.resolvePath(opts.file) : config.watchFile;
+  const shown = config.displayPath(file);
   const debounceMs = opts.debounceMs ?? config.watchDebounceMs;
   const logger = opts.logger || console;
   const onResult = opts.onResult || (() => {});
@@ -34,7 +35,7 @@ function createWatcher(engine, opts = {}) {
     try {
       for (let attempt = 1; attempt <= 4; attempt++) {
         try {
-          if (!fs.existsSync(file)) throw Object.assign(new Error(`Workbook not found: ${file}`), { fatal: true });
+          if (!fs.existsSync(file)) throw Object.assign(new Error(`Workbook not found: ${shown}`), { fatal: true });
           const buf = await fs.promises.readFile(file); // read once so a save mid-sync cannot mix versions
           const result = await engine.runSync({ source: buf, sourceName: path.basename(file), trigger: 'watch' });
           state.runs++;
@@ -88,7 +89,7 @@ function createWatcher(engine, opts = {}) {
     watcher.on('add', () => schedule('add')).on('change', () => schedule('change'));
     watcher.on('error', (e) => logger.error(`[excel-sync] watcher error: ${e.message}`));
     state.enabled = true;
-    logger.log(`[excel-sync] watching ${file}`);
+    logger.log(`[excel-sync] watching ${shown}`);
     if (syncOnStart) run('startup');
   }
 

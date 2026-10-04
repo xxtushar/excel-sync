@@ -1,6 +1,7 @@
 'use strict';
 /** Standalone server: `npm start`. */
 
+const fs = require('fs');
 const express = require('express');
 const config = require('./config');
 const { createExcelSync } = require('./index');
@@ -18,7 +19,14 @@ async function main() {
   app.use('/api', excelSync.router);
   app.use((req, res) => res.status(404).json({ error: `No route ${req.method} ${req.path}` }));
 
-  if (config.watchEnabled && config.watchFile) excelSync.startWatcher();
+  if (config.watchEnabled) {
+    if (fs.existsSync(config.watchFile)) excelSync.startWatcher();
+    else
+      console.log(
+        `[excel-sync] watcher off: no workbook at ${config.displayPath(config.watchFile)}. ` +
+          'Put avyra.xlsx in the project folder, or set WATCH_FILE in .env (relative to the project folder, or a full path).'
+      );
+  }
 
   const server = app.listen(config.port, () => {
     console.log(`[excel-sync] API on http://localhost:${config.port}/api  (database: ${config.db.database}, deleteMode: ${config.deleteMode})`);

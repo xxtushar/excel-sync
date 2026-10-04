@@ -17,18 +17,23 @@ Requirements: Node 18.17+ and MySQL 8+.
 ```bash
 # 1. install
 npm install
-cp .env.example .env        # fill in DB_* (and WATCH_FILE if you want auto-sync)
+cp .env.example .env        # fill in DB_USER / DB_PASSWORD
 
 # 2. load the database from the dump. No `mysql` command-line client needed.
 #    If the database already has tables it does nothing; add -- --force to wipe and reload.
 npm run load-dump
 
-# 3. check the workbook matches the database. Expect "The database already matches the workbook."
-npm run sync -- path/to/pgdump1.xlsx --dry-run
+# 3. your working copy of the workbook, next to package.json (it is git-ignored)
+cp test/fixtures/pgdump1.xlsx avyra.xlsx
 
-# 4. run the API (+ watcher if WATCH_FILE is set)
+# 4. check the workbook matches the database. Expect "The database already matches the workbook."
+npm run sync -- avyra.xlsx --dry-run
+
+# 5. run the API, plus the watcher on avyra.xlsx
 npm start
 ```
+
+Nothing is tied to one machine. `.env` is read from the project folder, whichever directory you start the app from. `WATCH_FILE` defaults to `avyra.xlsx` in the project folder, and relative paths in it are resolved against the project folder. A full path or `~/...` also works if you keep the workbook somewhere else. If the workbook isn't there, the API still starts and tells you the watcher is off.
 
 The first run creates two bookkeeping tables, `_excel_sync_state` and `_excel_sync_log`. They don't start with `st_`/`dy_`, so the sync and the table API ignore them.
 
@@ -154,12 +159,12 @@ Table and column names are checked against the live schema before they reach SQL
 ## 4. Plugging into the backend you'll be given
 
 ```js
-const { createExcelSync } = require('./avyra-excel-sync/src');
+const { createExcelSync } = require('./excel-sync/src');
 
 // Reuse the backend's pool. It MUST have dateStrings: true (checked at startup).
 const excelSync = await createExcelSync({ pool, database: 'avyra', auth: false /* use the backend's own auth */ });
 app.use('/api/admin/excel', requireAdmin, excelSync.router);
-excelSync.startWatcher({ file: process.env.WATCH_FILE }); // optional
+excelSync.startWatcher();                                  // optional: watches WATCH_FILE (default avyra.xlsx in this project)
 ```
 
 Or skip the HTTP layer and call the engine directly:

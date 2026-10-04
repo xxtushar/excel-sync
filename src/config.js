@@ -1,5 +1,26 @@
 'use strict';
-require('dotenv').config({ quiet: true });
+const os = require('os');
+const path = require('path');
+
+// The project folder, wherever it lives on this machine. Nothing below depends on where the
+// project was cloned or which directory the app is started from.
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+// Load .env from the project folder (not from the current directory), unless one was given explicitly.
+require('dotenv').config({ path: process.env.DOTENV_CONFIG_PATH || path.join(PROJECT_ROOT, '.env'), quiet: true });
+
+/** Relative paths are relative to the project folder; `~/...` is the user's home folder. */
+function resolvePath(p) {
+  if (!p) return '';
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = path.join(os.homedir(), p.slice(1));
+  return path.isAbsolute(p) ? path.normalize(p) : path.resolve(PROJECT_ROOT, p);
+}
+
+/** How to show a path in logs: relative when it is inside the project folder. */
+function displayPath(p) {
+  const rel = path.relative(PROJECT_ROOT, p);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : p;
+}
 
 function bool(v, def) {
   if (v === undefined || v === '') return def;
@@ -45,10 +66,15 @@ const config = {
   // Sheets to skip entirely.
   ignoreSheets: list(process.env.IGNORE_SHEETS, ['_README']),
 
-  // File watcher
-  watchFile: process.env.WATCH_FILE || '',
+  // File watcher. Default: avyra.xlsx in the project folder. Relative paths resolve against the
+  // project folder, so the same .env works on every machine.
+  watchFile: resolvePath(process.env.WATCH_FILE || 'avyra.xlsx'),
   watchDebounceMs: Number(process.env.WATCH_DEBOUNCE_MS || 2000),
-  watchEnabled: bool(process.env.WATCH_ENABLED, !!process.env.WATCH_FILE),
+  watchEnabled: bool(process.env.WATCH_ENABLED, true),
+
+  projectRoot: PROJECT_ROOT,
+  resolvePath,
+  displayPath,
 
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 20),
   pageLimitMax: Number(process.env.PAGE_LIMIT_MAX || 500),
