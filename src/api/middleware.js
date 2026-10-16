@@ -33,6 +33,14 @@ const DB_ERROR_STATUS = {
   ER_TRUNCATED_WRONG_VALUE_FOR_FIELD: 400,
   ER_WARN_DATA_OUT_OF_RANGE: 400,
   ER_NO_DEFAULT_FOR_FIELD: 400,
+  // Column changes (most are caught earlier with a clearer message; these are the backstop)
+  ER_DUP_FIELDNAME: 409,
+  ER_INVALID_DEFAULT: 400,
+  ER_BLOB_CANT_HAVE_DEFAULT: 400,
+  ER_BLOB_KEY_WITHOUT_LENGTH: 400,
+  ER_INVALID_USE_OF_NULL: 409,
+  WARN_DATA_TRUNCATED: 400,
+  ER_DEPENDENT_BY_CHECK_CONSTRAINT: 409,
 };
 
 // eslint-disable-next-line no-unused-vars

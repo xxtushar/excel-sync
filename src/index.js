@@ -8,7 +8,9 @@
  *   excelSync.startWatcher();                                  // optional
  *
  * If you pass your own pool it MUST be created with { dateStrings: true }, otherwise DATETIME values come back as
- * JS Dates and every datetime cell looks changed. Without a pool, one is created from .env.
+ * JS Dates and every datetime cell looks changed. Its connections must also use UTC (SET time_zone = '+00:00'),
+ * like the pool from db.js, or TIMESTAMP values are shifted by the machine's time zone. Without a pool, one is
+ * created from .env.
  */
 
 const express = require('express');
@@ -18,6 +20,7 @@ const { createEngine } = require('./sync/engine');
 const store = require('./sync/store');
 const { createSyncRouter } = require('./api/syncRoutes');
 const { createTableRouter } = require('./api/tableRoutes');
+const { createColumnRouter } = require('./api/columnRoutes');
 const { createWatcher } = require('./watcher');
 const { apiKeyAuth, errorHandler } = require('./api/middleware');
 
@@ -37,6 +40,7 @@ async function createExcelSync(opts = {}) {
   const router = express.Router();
   if (opts.auth !== false) router.use(apiKeyAuth(opts.apiKey ?? config.apiKey));
   router.use(createSyncRouter({ engine, pool, getWatcher: () => watcher }));
+  router.use(createColumnRouter({ engine })); // before the table router: /tables/:table/columns is not a row id
   router.use(createTableRouter({ engine, pool }));
   router.use(errorHandler);
 

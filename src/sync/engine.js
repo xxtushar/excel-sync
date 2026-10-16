@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Orchestrates one sync run: lock → read schema → read workbook → diff → (apply in a transaction) → log.
+ * Orchestrates one sync run: lock → read schema → read workbook → diff → (add columns, apply in a transaction) → log.
  * Used by the upload endpoint, the file watcher and the CLI alike.
  */
 
@@ -9,7 +9,7 @@ const config = require('../config');
 const { introspect } = require('../schema/introspect');
 const { readWorkbook } = require('../excel/readWorkbook');
 const { buildPlan, totals } = require('./diff');
-const { applyPlan, friendlyDbError } = require('./apply');
+const { applyPlan, addColumns, dropColumns, friendlyDbError } = require('./apply');
 const store = require('./store');
 
 class SyncBusyError extends Error {
@@ -26,6 +26,24 @@ function createEngine(pool, dbName = config.db.database) {
   async function getSchema(refresh = false) {
     if (!schemaCache || refresh) schemaCache = await introspect(pool, dbName);
     return schemaCache;
+  }
+
+  /**
+   * Runs fn(conn) while holding the sync lock, so syncs and column changes never overlap.
+   * Throws SyncBusyError (409) instead of waiting if the lock is taken.
+   */
+  async function withLock(fn) {
+    const conn = await pool.getConnection();
+    let locked = false;
+    try {
+      const [[{ got }]] = await conn.query('SELECT GET_LOCK(?, 0) AS got', [lockName]);
+      if (got !== 1) throw new SyncBusyError();
+      locked = true;
+      return await fn(conn);
+    } finally {
+      if (locked) await conn.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => {});
+      conn.release();
+    }
   }
 
   /**
@@ -49,13 +67,7 @@ function createEngine(pool, dbName = config.db.database) {
       throw e;
     }
 
-    const conn = await pool.getConnection();
-    let locked = false;
-    try {
-      const [[{ got }]] = await conn.query('SELECT GET_LOCK(?, 0) AS got', [lockName]);
-      if (got !== 1) throw new SyncBusyError();
-      locked = true;
-
+    return withLock(async (conn) => {
       const schema = await getSchema(true); // pick up schema changes on every run
       const onlyTables = o.tables && o.tables.length ? new Set(o.tables) : null;
       const workbook = await readWorkbook(o.source, schema, { onlyTables });
@@ -97,20 +109,29 @@ function createEngine(pool, dbName = config.db.database) {
       }
 
       if (!o.dryRun && result.status !== 'invalid') {
-        await conn.beginTransaction();
+        // ALTER TABLE commits on its own, so new columns go in before the transaction and come out again on failure.
+        let added = [];
         try {
+          added = await addColumns(conn, plan);
+          await conn.beginTransaction();
           if (t.tablesChanged) await applyPlan(conn, schema, plan);
           await conn.commit();
           if (t.tablesChanged) {
             result.status = 'applied';
-            result.message = `Applied: ${t.inserted} inserted, ${t.updated} updated, ${t.softDeleted} soft-deleted, ${t.hardDeleted} deleted.`;
+            result.message =
+              `Applied: ${t.inserted} inserted, ${t.updated} updated, ${t.softDeleted} soft-deleted, ${t.hardDeleted} deleted` +
+              (t.columnsAdded ? `, ${t.columnsAdded} column(s) added.` : '.');
           }
         } catch (e) {
           await conn.rollback().catch(() => {});
+          await dropColumns(conn, added).catch((dropErr) =>
+            result.warnings.push({ message: `Could not remove the column(s) this sync added: ${dropErr.message}` })
+          );
           result.status = 'failed';
           result.message = 'The database rejected a change, so the whole sync was rolled back. Nothing was changed.';
           result.errors.push({ sheet: e.sheet, row: e.row, message: friendlyDbError(e), code: e.code });
         }
+        if (t.columnsAdded) await getSchema(true); // the table API sees the new columns straight away
       }
 
       // Hashes are remembered only after a successful apply, so a sheet is re-checked until it goes in cleanly.
@@ -124,10 +145,7 @@ function createEngine(pool, dbName = config.db.database) {
 
       result.durationMs = Date.now() - startedAt.getTime();
       return result;
-    } finally {
-      if (locked) await conn.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => {});
-      conn.release();
-    }
+    });
   }
 
   async function writeLogSafe(conn, result, startedAt) {
@@ -151,6 +169,7 @@ function createEngine(pool, dbName = config.db.database) {
             softDeleted: x.softDeletes.length,
             hardDeleted: x.hardDeletes.length,
             kept: x.notDeleted.length,
+            addedColumns: x.addColumns.map((c) => c.name),
             insertedIds: x.inserts.map((i) => i.id ?? i.assignedId),
             updatedIds: x.updates.map((u) => u.id),
             removedIds: [...x.softDeletes, ...x.hardDeletes].map((d) => d.id),
@@ -164,7 +183,7 @@ function createEngine(pool, dbName = config.db.database) {
     }
   }
 
-  return { getSchema, runSync, pool };
+  return { getSchema, runSync, withLock, pool };
 }
 
 module.exports = { createEngine, SyncBusyError };

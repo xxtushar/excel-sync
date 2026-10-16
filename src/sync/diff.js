@@ -12,7 +12,8 @@ const { cascadeImpact } = require('./cascade');
 const MASS_DELETE_RATIO = 0.5;
 const MASS_DELETE_MIN_ROWS = 10;
 
-async function fetchRows(conn, table, columns) {
+/** Columns this sync is about to add (`newColumns`) are NULL in every existing row. */
+async function fetchRows(conn, table, columns, newColumns = []) {
   const [rows] = await conn.query(`SELECT ${columns.map(q).join(', ')} FROM ${q(table.name)}`);
   const pk = table.primaryKey[0];
   const pkCol = table.columnMap[pk.toLowerCase()];
@@ -20,6 +21,7 @@ async function fetchRows(conn, table, columns) {
   for (const r of rows) {
     const norm = {};
     for (const c of columns) norm[c] = fromDbValue(table.columnMap[c.toLowerCase()], r[c]);
+    for (const c of newColumns) norm[c.name] = null;
     map.set(String(fromDbValue(pkCol, r[pk])), norm);
   }
   return map;
@@ -55,6 +57,7 @@ async function buildPlan(conn, schema, workbook, opts = {}) {
       status: 'changed',
       sheetRows: sheet.rows.length,
       dbRows: 0,
+      addColumns: [],
       inserts: [],
       updates: [],
       softDeletes: [],
@@ -74,8 +77,12 @@ async function buildPlan(conn, schema, workbook, opts = {}) {
       continue;
     }
 
-    const fetchCols = [...new Set([pk, ...sheet.columns, ...table.softDeleteColumns])];
-    const dbRows = await fetchRows(conn, table, fetchCols);
+    const newColumns = Object.fromEntries(sheet.newColumns.map((c) => [c.name, c]));
+    const colOf = (name) => table.columnMap[name.toLowerCase()] || newColumns[name];
+    entry.addColumns = sheet.newColumns.map((c) => ({ name: c.name, type: c.columnType }));
+
+    const fetchCols = [...new Set([pk, ...sheet.columns.filter((c) => !newColumns[c]), ...table.softDeleteColumns])];
+    const dbRows = await fetchRows(conn, table, fetchCols, sheet.newColumns);
     entry.dbRows = dbRows.size;
 
     // Next free id, for blank-id rows.
@@ -115,8 +122,7 @@ async function buildPlan(conn, schema, workbook, opts = {}) {
         for (const c of sheet.columns) {
           const v = row.values[c];
           if (v === null && row.nullRequired.includes(c)) {
-            const col = table.columnMap[c.toLowerCase()];
-            if (col.hasDefault) continue; // let MySQL fill its default
+            if (colOf(c).hasDefault) continue; // let MySQL fill its default
             errors.push({ ...where, column: c, message: `${c} is required for a new row.` });
             bad = true;
             continue;
@@ -137,8 +143,7 @@ async function buildPlan(conn, schema, workbook, opts = {}) {
       const before = {};
       for (const c of sheet.columns) {
         if (c === pk) continue;
-        const col = table.columnMap[c.toLowerCase()];
-        if (!sameValue(col, row.values[c], dbRow[c])) {
+        if (!sameValue(colOf(c), row.values[c], dbRow[c])) {
           if (row.values[c] === null && row.nullRequired.includes(c)) {
             errors.push({ ...where, column: c, message: `${c} cannot be empty.` });
             continue;
@@ -197,7 +202,7 @@ async function buildPlan(conn, schema, workbook, opts = {}) {
         });
     }
 
-    if (!entry.inserts.length && !entry.updates.length && !entry.softDeletes.length && !entry.hardDeletes.length)
+    if (!entry.addColumns.length && !entry.inserts.length && !entry.updates.length && !entry.softDeletes.length && !entry.hardDeletes.length)
       entry.status = 'no-changes';
   }
 
@@ -282,8 +287,9 @@ async function checkForeignKeys(conn, schema, planTables, errors) {
 }
 
 function totals(plan) {
-  const t = { inserted: 0, updated: 0, softDeleted: 0, hardDeleted: 0, cascaded: 0, tablesChanged: 0 };
+  const t = { columnsAdded: 0, inserted: 0, updated: 0, softDeleted: 0, hardDeleted: 0, cascaded: 0, tablesChanged: 0 };
   for (const e of plan.tables) {
+    t.columnsAdded += e.addColumns.length;
     t.inserted += e.inserts.length;
     t.updated += e.updates.length;
     t.softDeleted += e.softDeletes.length;

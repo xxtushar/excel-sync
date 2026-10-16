@@ -60,7 +60,11 @@ const config = {
   //   insert : insert with AUTO_INCREMENT (the row will be inserted AGAIN on the next sync unless you add the id)
   blankIdMode: process.env.BLANK_ID_MODE || 'reject',
 
-  // Columns in the sheet that do not exist in the table: 'warn' (ignore them) or 'error'.
+  // Columns in the sheet that do not exist in the table:
+  //   warn  : ignore them, with a warning
+  //   error : stop the sync
+  //   add   : add them to the table (nullable, type picked from the cells). Headers that are not valid
+  //           column names (spaces, symbols) are still ignored, so they can hold your own notes.
   unknownColumnMode: process.env.UNKNOWN_COLUMN_MODE || 'warn',
 
   // Sheets to skip entirely.

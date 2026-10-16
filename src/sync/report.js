@@ -9,6 +9,7 @@ function printResult(r, log = console) {
   log.log(`[excel-sync] ${r.status.toUpperCase()} (${r.trigger}, ${r.source}, ${r.durationMs ?? '?'} ms): ${r.message || ''}`);
   for (const t of r.tables.filter((x) => x.status === 'changed')) {
     const parts = [];
+    if (t.addColumns.length) parts.push(`+${t.addColumns.length} column(s): ${t.addColumns.map((c) => `${c.name} ${c.type}`).join(', ')}`);
     if (t.inserts.length) parts.push(`+${t.inserts.length} inserted`);
     if (t.updates.length) parts.push(`~${t.updates.length} updated`);
     if (t.softDeletes.length) parts.push(`-${t.softDeletes.length} soft-deleted`);
@@ -36,7 +37,9 @@ function toResponse(r, { details = true, cap = 200 } = {}) {
         status: t.status,
         sheetRows: t.sheetRows,
         dbRows: t.dbRows,
+        addColumns: t.addColumns,
         counts: {
+          addColumns: t.addColumns.length,
           inserts: t.inserts.length,
           updates: t.updates.length,
           softDeletes: t.softDeletes.length,

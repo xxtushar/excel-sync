@@ -195,3 +195,77 @@ test('watcher: saving the workbook updates the database', async () => {
   assert.ok(results[2].tables.every((t) => t.status === 'unchanged'));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('columns: add, rename, widen, drop', async () => {
+  let res = await json('POST', '/tables/dy_pg_info/columns', { name: 'parking_slots', type: 'int', nullable: false, default: 0, after: 'pg_landmark' });
+  assert.equal(res.status, 201);
+  assert.deepEqual((await res.json()).column, { name: 'parking_slots', type: 'int', nullable: false, default: '0', locked: null });
+  let cols = (await (await fetch(`${base}/tables/dy_pg_info/columns`)).json()).columns.map((c) => c.name);
+  assert.equal(cols[cols.indexOf('pg_landmark') + 1], 'parking_slots');
+  assert.equal((await (await fetch(`${base}/tables/dy_pg_info/9`)).json()).parking_slots, 0, 'existing rows get the default');
+
+  res = await json('PATCH', '/tables/dy_pg_info/9', { parking_slots: 4 });
+  assert.equal((await res.json()).parking_slots, 4);
+
+  // An export carries the new column, and syncing it back changes nothing.
+  const exported = Buffer.from(await (await fetch(`${base}/export`)).arrayBuffer());
+  const r = await (await upload('/sync?full=true', exported, 'export.xlsx')).json();
+  assert.equal(r.status, 'no-changes', JSON.stringify(r.errors));
+
+  // A rename keeps the type, default and data.
+  res = await json('PATCH', '/tables/dy_pg_info/columns/parking_slots', { name: 'parking_spaces' });
+  assert.deepEqual((await res.json()).column, { name: 'parking_spaces', type: 'int', nullable: false, default: '0', locked: null });
+  assert.equal((await (await fetch(`${base}/tables/dy_pg_info/9`)).json()).parking_spaces, 4);
+
+  // int → varchar loses nothing, so no confirmation is needed; the default carries over.
+  res = await json('PATCH', '/tables/dy_pg_info/columns/parking_spaces', { type: 'varchar(10)' });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).column, { name: 'parking_spaces', type: 'varchar(10)', nullable: false, default: '0', locked: null });
+  assert.equal((await (await fetch(`${base}/tables/dy_pg_info/9`)).json()).parking_spaces, '4');
+
+  assert.equal((await json('DELETE', '/tables/dy_pg_info/columns/parking_spaces')).status, 409, 'it holds data');
+  res = await json('DELETE', '/tables/dy_pg_info/columns/parking_spaces?confirm=true');
+  assert.deepEqual(await res.json(), { table: 'dy_pg_info', dropped: 'parking_spaces' });
+  cols = (await (await fetch(`${base}/tables/dy_pg_info/columns`)).json()).columns.map((c) => c.name);
+  assert.ok(!cols.includes('parking_spaces'));
+});
+
+test('columns: lossy type changes need confirm; bad or unsafe changes are refused', async () => {
+  // datetime → date drops the time of day: listed, and only done with confirm=true.
+  let res = await json('PATCH', '/tables/dy_pg_events_info/columns/event_date', { type: 'date' });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.match(body.error, /would change/);
+  assert.ok(body.changed.some((c) => c.id === 3 && c.from === '2026-09-28 20:03:04' && c.to === '2026-09-28'));
+  res = await json('PATCH', '/tables/dy_pg_events_info/columns/event_date?confirm=true', { type: 'date' });
+  assert.equal(res.status, 200);
+  assert.equal((await (await fetch(`${base}/tables/dy_pg_events_info/3`)).json()).event_date, '2026-09-28');
+
+  const refused = async (method, url, payload, status, pattern) => {
+    const r = await json(method, url, payload);
+    assert.equal(r.status, status, `${method} ${url}`);
+    assert.match((await r.json()).error, pattern);
+  };
+  await refused('PATCH', '/tables/dy_pg_info/columns/pg_name', { type: 'int' }, 409, /cannot be stored as int/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/pg_landmark', { type: 'varchar(5)' }, 409, /cannot be stored/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/pg_create_time', { nullable: false }, 409, /cannot be NOT NULL/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/id', { name: 'pg_key' }, 409, /primary key/);
+  await refused('DELETE', '/tables/dy_pg_info/columns/pg_owner?confirm=true', null, 409, /foreign key to dy_user\.id/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/pg_name', { name: 'PG_LANDMARK' }, 409, /already has a column "pg_landmark"/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/pg_name', { size: 10 }, 400, /Unknown field/);
+  await refused('PATCH', '/tables/dy_pg_info/columns/nope', { name: 'x' }, 404, /no column "nope"/);
+  await refused('POST', '/tables/dy_pg_info/columns', { name: 'x', type: 'varchar(10); DROP TABLE dy_user' }, 400, /Unsupported type/);
+  await refused('POST', '/tables/dy_pg_info/columns', { name: 'bad name', type: 'int' }, 400, /column name/);
+  await refused('POST', '/tables/dy_pg_info/columns', { name: 'x', type: 'int', nullable: false }, 400, /needs a "default"/);
+  await refused('POST', '/tables/dy_pg_info/columns', { name: 'x', type: 'int', default: 'many' }, 400, /does not fit int/);
+  await refused('POST', '/tables/dy_pg_info/columns', { name: 'x', type: 'text', default: 'a' }, 400, /cannot have a default/);
+  await refused('POST', '/tables/nope/columns', { name: 'x', type: 'int' }, 404, /Unknown table/);
+
+  // None of the refused requests changed anything.
+  const cols = (await (await fetch(`${base}/tables/dy_pg_info/columns`)).json()).columns;
+  assert.deepEqual(
+    cols.filter((c) => ['id', 'pg_name', 'pg_landmark', 'pg_owner'].includes(c.name)).map((c) => [c.name, c.type, c.nullable]),
+    [['id', 'int', false], ['pg_name', 'varchar(45)', true], ['pg_owner', 'int', true], ['pg_landmark', 'varchar(45)', true]]
+  );
+  assert.ok(!cols.some((c) => c.name === 'x'));
+});

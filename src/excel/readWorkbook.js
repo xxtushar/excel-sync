@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 const config = require('../config');
 const { findTable } = require('../schema/introspect');
+const { isValidColumnName, inferType, pendingColumn } = require('../schema/columns');
 const { toDbValue, unwrapCell } = require('./normalize');
 
 async function loadWorkbook(source) {
@@ -77,6 +78,7 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
     const header = ws.getRow(1);
     const colIndex = []; // [{ idx, col }]
     const seenCols = new Set();
+    const newHeaders = []; // [{ idx, name }] columns to add to the table (UNKNOWN_COLUMN_MODE=add)
     const lastCol = Math.max(ws.columnCount, header.cellCount);
     for (let c = 1; c <= lastCol; c++) {
       const raw = unwrapCell(header.getCell(c).value);
@@ -84,7 +86,16 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
       const name = String(raw).trim();
       const col = table.columnMap[name.toLowerCase()];
       if (!col) {
-        const msg = `Column "${name}" does not exist in ${table.name}; ignored.`;
+        const adding = config.unknownColumnMode === 'add';
+        if (adding && isValidColumnName(name)) {
+          if (newHeaders.some((h) => h.name.toLowerCase() === name.toLowerCase()))
+            sheetErrors.push({ sheet: sheetName, column: name, message: `Column "${name}" appears twice in the header.` });
+          else newHeaders.push({ idx: c, name });
+          continue;
+        }
+        const msg = adding
+          ? `Column "${name}" is not a valid column name (letters, digits and _ only), so it was not added; ignored.`
+          : `Column "${name}" does not exist in ${table.name}; ignored.`;
         (config.unknownColumnMode === 'error' ? sheetErrors : sheetWarnings).push({ sheet: sheetName, column: name, message: msg });
         continue;
       }
@@ -99,6 +110,18 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
       seenCols.add(col.name);
       colIndex.push({ idx: c, col });
     }
+
+    // A new column's type comes from the cells under its header; its values are then read like any other column's.
+    const newColumns = newHeaders.map(({ idx, name }) => {
+      const cells = [];
+      for (let r = 2; r <= ws.rowCount; r++) {
+        const v = ws.getRow(r).getCell(idx).value;
+        if (!isBlank(v)) cells.push(unwrapCell(v));
+      }
+      const col = pendingColumn(name, inferType(cells));
+      colIndex.push({ idx, col });
+      return col;
+    });
 
     const pk = table.primaryKey[0];
     if (!seenCols.has(pk)) {
@@ -171,7 +194,7 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
 
     errors.push(...sheetErrors);
     warnings.push(...sheetWarnings);
-    sheets.push({ sheetName, table: table.name, columns, rows, hash, hasErrors: sheetErrors.length > 0 });
+    sheets.push({ sheetName, table: table.name, columns, newColumns, rows, hash, hasErrors: sheetErrors.length > 0 });
   }
 
   return { sheets, errors, warnings };

@@ -2,6 +2,7 @@
 /**
  * Executes a plan inside the caller's transaction.
  * Inserts/updates run parents → children; deletes run children → parents.
+ * New columns are added beforehand by addColumns(), outside the transaction.
  */
 
 const { q } = require('../db');
@@ -77,6 +78,32 @@ async function applyPlan(conn, schema, plan) {
   }
 }
 
+/**
+ * Adds the columns new to the workbook, one ALTER TABLE per table. MySQL commits DDL on its own, so this runs
+ * before the data transaction and the caller drops the columns again if that fails. If one ALTER fails, the
+ * columns already added are dropped here. Returns [{ table, columns }] for dropColumns().
+ */
+async function addColumns(conn, plan) {
+  const added = [];
+  for (const t of plan.tables) {
+    if (t.status !== 'changed' || !t.addColumns.length) continue;
+    try {
+      await conn.query(`ALTER TABLE ${q(t.table)} ${t.addColumns.map((c) => `ADD COLUMN ${q(c.name)} ${c.type} NULL`).join(', ')}`);
+    } catch (e) {
+      await dropColumns(conn, added).catch(() => {});
+      e.sheet = t.sheet;
+      throw e;
+    }
+    added.push({ table: t.table, columns: t.addColumns.map((c) => c.name) });
+  }
+  return added;
+}
+
+async function dropColumns(conn, added) {
+  for (const { table, columns } of added)
+    await conn.query(`ALTER TABLE ${q(table)} ${columns.map((c) => `DROP COLUMN ${q(c)}`).join(', ')}`);
+}
+
 /** Turn a MySQL error into a sentence a person can act on. */
 function friendlyDbError(e) {
   const where = e.sheet ? `Sheet ${e.sheet}${e.row ? ` row ${e.row}` : ''}: ` : '';
@@ -99,4 +126,4 @@ function friendlyDbError(e) {
   }
 }
 
-module.exports = { applyPlan, friendlyDbError };
+module.exports = { applyPlan, addColumns, dropColumns, friendlyDbError };
