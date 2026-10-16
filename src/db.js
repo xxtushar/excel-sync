@@ -8,7 +8,7 @@ const mysql = require('mysql2/promise');
  *  - decimalNumbers is left off: DECIMAL comes back as a string ('10400.00') and is compared at column scale.
  */
 function createPool(dbConfig) {
-  return mysql.createPool({
+  const pool = mysql.createPool({
     ...dbConfig,
     waitForConnections: true,
     connectionLimit: 10,
@@ -18,6 +18,15 @@ function createPool(dbConfig) {
     multipleStatements: false,
     charset: 'utf8mb4',
   });
+  // MySQL converts TIMESTAMP columns to the session time zone. The dump and the workbook hold UTC, so every
+  // connection uses UTC; with the machine's zone (e.g. IST) each timestamp would read 5h30m off and be rewritten.
+  // mysql2 emits 'connection' before handing the connection out, so this runs before any other query on it.
+  pool.on('connection', (conn) => {
+    conn.query("SET time_zone = '+00:00'", (err) => {
+      if (err) console.error(`[excel-sync] could not set the session time zone to UTC: ${err.message}`);
+    });
+  });
+  return pool;
 }
 
 /** Backtick-quote an identifier. Only ever called with names that came from INFORMATION_SCHEMA. */
