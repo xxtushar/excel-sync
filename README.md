@@ -18,7 +18,7 @@ Requirements: Node 18.17+ and MySQL 8+.
 ```bash
 # 1. install
 npm install
-cp .env.example .env        # fill in DB_USER / DB_PASSWORD
+cp config.example.json config.json   # fill in DB_USER / DB_PASSWORD
 
 # 2. load the database from the dump. No `mysql` command-line client needed.
 #    If the database already has tables it does nothing; add -- --force to wipe and reload.
@@ -34,7 +34,46 @@ npm run sync -- avyra.xlsx --dry-run
 npm start
 ```
 
-Nothing is tied to one machine. `.env` is read from the project folder, whichever directory you start the app from. `WATCH_FILE` defaults to `avyra.xlsx` in the project folder, and relative paths in it are resolved against the project folder. A full path or `~/...` also works if you keep the workbook somewhere else. If the workbook isn't there, the API still starts and tells you the watcher is off.
+Nothing is tied to one machine. `config.json` is read from the project folder, whichever directory you start the app from. `WATCH_FILE` defaults to `avyra.xlsx` in the project folder, and relative paths in it are resolved against the project folder. A full path or `~/...` also works if you keep the workbook somewhere else. If the workbook isn't there, the API still starts and tells you the watcher is off.
+
+### Settings: `config.json`
+
+All settings, including the database login and the API key, live in `config.json` in the project folder. It is git-ignored, so the password never reaches GitHub. `config.example.json` is the committed template with every setting at its default.
+
+Values are typed. Write numbers and true/false without quotes:
+
+| Setting | Type | Default | Meaning |
+|---|---|---|---|
+| `DB_HOST` | text | `"localhost"` | MySQL server |
+| `DB_PORT` | whole number, 1–65535 | `3306` | MySQL port |
+| `DB_USER` | text | `"root"` | MySQL user |
+| `DB_PASSWORD` | text (may be empty) | `""` | MySQL password |
+| `DB_NAME` | text | `"avyra"` | database to sync |
+| `PORT` | whole number, 1–65535 | `4000` | API port |
+| `API_KEY` | text (may be empty) | `""` | when set, every request needs the header `x-api-key` |
+| `MAX_UPLOAD_MB` | whole number ≥ 1 | `20` | largest workbook upload |
+| `PAGE_LIMIT_MAX` | whole number ≥ 1 | `500` | largest `?limit` on the table API |
+| `WATCH_FILE` | text | `"avyra.xlsx"` | workbook to watch; relative to the project folder, a full path, or `~/...` |
+| `WATCH_ENABLED` | true / false | `true` | run the watcher with `npm start` |
+| `WATCH_DEBOUNCE_MS` | whole number ≥ 0 | `2000` | wait this long after a save before syncing |
+| `WATCH_POLL` | true / false | `false` | poll instead of file events (network drives, WSL, Docker) |
+| `DELETE_MODE` | `"soft"`, `"hard"` or `"none"` | `"soft"` | what happens to rows removed from a sheet (section 2) |
+| `SOFT_DELETE_COLUMNS` | list of names | `["is_active", "rstatus", "active"]` | columns set to 0 by a soft delete |
+| `BLANK_ID_MODE` | `"reject"` or `"insert"` | `"reject"` | rows with an empty id |
+| `UNKNOWN_COLUMN_MODE` | `"warn"`, `"error"` or `"add"` | `"warn"` | sheet headers that are not columns (section 2) |
+| `IGNORE_SHEETS` | list of names | `["_README"]` | sheets to skip |
+| `STATIC_PREFIX` / `DYNAMIC_PREFIX` | text | `"st_"` / `"dy_"` | which tables count as static / dynamic |
+| `TEST_DB_NAME` | text | `"avyra_test"` | throwaway database for `npm test` |
+
+A wrong type, a value outside the allowed range, or a misspelled name stops startup and says exactly what to fix:
+
+```
+ConfigError: Invalid settings:
+  - config.json: unknown setting "DB_PROT". Did you mean "DB_PORT"?
+  - DB_PORT in config.json must be a whole number from 1 to 65535 (no quotes), got "3306".
+```
+
+Each setting is looked up in this order, first match wins: a variable set in the shell or by the host (`DB_PASSWORD=... npm start`), then `config.json`, then `.env` (still supported, see `.env.example`), then the default. `CONFIG_FILE=/path/to/other.json` uses a different file.
 
 The first run creates two bookkeeping tables, `_excel_sync_state` and `_excel_sync_log`. They don't start with `st_`/`dy_`, so the sync and the table API ignore them.
 
@@ -83,7 +122,7 @@ read schema from MySQL ─► read workbook ─► diff each sheet vs its table 
 
 ### Adding columns from the workbook (`UNKNOWN_COLUMN_MODE=add`)
 
-With `UNKNOWN_COLUMN_MODE=add` in `.env`, a header that isn't a column yet becomes a new column on the next sync. Type a header such as `parking_slots` in the next free column of the sheet, fill in the rows that need a value, and save.
+With `"UNKNOWN_COLUMN_MODE": "add"` in `config.json`, a header that isn't a column yet becomes a new column on the next sync. Type a header such as `parking_slots` in the next free column of the sheet, fill in the rows that need a value, and save.
 
 - The column is added as nullable, so rows left empty get NULL.
 - Its type is picked from the cells: whole numbers → `int` (`bigint` if too big), numbers with up to 2 decimals → `decimal(15,2)`, other numbers → `double`, dates → `date` (or `datetime` if any has a time), TRUE/FALSE → `boolean`, anything else → `varchar(255)` (`text` if longer). Keep a column formatted as Text in Excel if it must stay text (phone numbers, codes with leading zeros).
@@ -229,7 +268,7 @@ npm run sync -- avyra.xlsx --full --json > result.json
 
 ## 6. Tests
 
-`npm test` runs 24 integration tests against a throwaway database (`TEST_DB_NAME`, default `avyra_test`). It is rebuilt from `test/fixtures/tusharDump.sql` before every test, so your real `avyra` DB is never touched. The DB user needs permission to create and drop that database. The tests cover:
+`npm test` runs 4 settings tests and 24 integration tests against a throwaway database (`TEST_DB_NAME`, default `avyra_test`). It is rebuilt from `test/fixtures/tusharDump.sql` before every test, so your real `avyra` DB is never touched. The DB user needs permission to create and drop that database. The tests cover:
 
 - The untouched workbook matches the dump exactly: all 51 sheets, 2,209 rows, zero differences.
 - Edits, new rows, soft deletes, the static-table protection, and idempotency.
@@ -245,7 +284,8 @@ npm run sync -- avyra.xlsx --full --json > result.json
 
 ```
 src/
-  config.js                 settings from .env
+  settings.js               every setting: type, allowed values, default
+  config.js                 settings from the environment, config.json and .env
   db.js                     mysql2 pool (dateStrings) + identifier quoting
   schema/introspect.js      columns, keys, FKs, soft-delete columns, load order (topological sort)
   schema/columns.js         allowed column types, type inference for new sheet columns, column DDL

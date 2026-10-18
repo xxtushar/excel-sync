@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "sync": "node scripts/sync-file.js",
-    "test": "node --test --test-concurrency=1 test/sync.test.js test/api.test.js",
+    "test": "node --test --test-concurrency=1 test/config.test.js test/sync.test.js test/api.test.js",
     "load-dump": "node scripts/load-dump.js"
   },
   "license": "UNLICENSED",

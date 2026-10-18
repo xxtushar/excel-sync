@@ -1,5 +1,7 @@
 node_modules/
 .env
+# Your settings, with the database password and API key. The template is config.example.json.
+/config.json
 *.log
 ~$*.xlsx
 .DS_Store

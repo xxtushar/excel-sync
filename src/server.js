@@ -24,7 +24,7 @@ async function main() {
     else
       console.log(
         `[excel-sync] watcher off: no workbook at ${config.displayPath(config.watchFile)}. ` +
-          'Put avyra.xlsx in the project folder, or set WATCH_FILE in .env (relative to the project folder, or a full path).'
+          'Put avyra.xlsx in the project folder, or set WATCH_FILE in config.json (relative to the project folder, or a full path).'
       );
   }
 

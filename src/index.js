@@ -10,7 +10,7 @@
  * If you pass your own pool it MUST be created with { dateStrings: true }, otherwise DATETIME values come back as
  * JS Dates and every datetime cell looks changed. Its connections must also use UTC (SET time_zone = '+00:00'),
  * like the pool from db.js, or TIMESTAMP values are shifted by the machine's time zone. Without a pool, one is
- * created from .env.
+ * created from config.json / .env.
  */
 
 const express = require('express');

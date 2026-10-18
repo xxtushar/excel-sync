@@ -38,13 +38,13 @@ function q(name) {
 function connectionHint(e, cfg = {}) {
   switch (e && e.code) {
     case 'ECONNREFUSED':
-      return `Nothing is listening on ${cfg.host || 'localhost'}:${cfg.port || 3306}. Start MySQL (Mac: System Settings → MySQL → Start, or \`brew services start mysql\`) and check DB_HOST/DB_PORT in .env.`;
+      return `Nothing is listening on ${cfg.host || 'localhost'}:${cfg.port || 3306}. Start MySQL (Mac: System Settings → MySQL → Start, or \`brew services start mysql\`) and check DB_HOST/DB_PORT in config.json.`;
     case 'ER_ACCESS_DENIED_ERROR':
-      return `MySQL refused user "${cfg.user}". Check DB_USER and DB_PASSWORD in .env (put the password in single quotes).`;
+      return `MySQL refused user "${cfg.user}". Check DB_USER and DB_PASSWORD in config.json.`;
     case 'ER_BAD_DB_ERROR':
       return `Database "${cfg.database}" does not exist yet. Load it with: npm run load-dump`;
     case 'ENOTFOUND':
-      return `Host "${cfg.host}" not found. Check DB_HOST in .env.`;
+      return `Host "${cfg.host}" not found. Check DB_HOST in config.json.`;
     default:
       return null;
   }

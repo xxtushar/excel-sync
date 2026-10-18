@@ -11,7 +11,7 @@ const ExcelJS = require('exceljs');
 const config = require('../src/config');
 const { createPool } = require('../src/db');
 
-const TEST_DB = process.env.TEST_DB_NAME || 'avyra_test';
+const TEST_DB = config.testDbName;
 const DUMP = path.join(__dirname, 'fixtures', 'tusharDump.sql');
 const WORKBOOK = path.join(__dirname, 'fixtures', 'pgdump1.xlsx');
 const dbConfig = { ...config.db, database: TEST_DB };

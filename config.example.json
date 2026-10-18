@@ -1,0 +1,27 @@
+{
+  "DB_HOST": "localhost",
+  "DB_PORT": 3306,
+  "DB_USER": "root",
+  "DB_PASSWORD": "",
+  "DB_NAME": "avyra",
+
+  "PORT": 4000,
+  "API_KEY": "",
+  "MAX_UPLOAD_MB": 20,
+  "PAGE_LIMIT_MAX": 500,
+
+  "WATCH_FILE": "avyra.xlsx",
+  "WATCH_ENABLED": true,
+  "WATCH_DEBOUNCE_MS": 2000,
+  "WATCH_POLL": false,
+
+  "DELETE_MODE": "soft",
+  "SOFT_DELETE_COLUMNS": ["is_active", "rstatus", "active"],
+  "BLANK_ID_MODE": "reject",
+  "UNKNOWN_COLUMN_MODE": "warn",
+  "IGNORE_SHEETS": ["_README"],
+  "STATIC_PREFIX": "st_",
+  "DYNAMIC_PREFIX": "dy_",
+
+  "TEST_DB_NAME": "avyra_test"
+}

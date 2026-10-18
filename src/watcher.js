@@ -81,7 +81,7 @@ function createWatcher(engine, opts = {}) {
     if (watcher) return;
     watcher = chokidar.watch(file, {
       ignoreInitial: true,
-      usePolling: !!(opts.poll ?? process.env.WATCH_POLL === 'true'), // for network drives / WSL / Docker volumes
+      usePolling: !!(opts.poll ?? config.watchPoll), // for network drives / WSL / Docker volumes
       interval: 1000,
       awaitWriteFinish: { stabilityThreshold: 800, pollInterval: 100 },
       atomic: true,
