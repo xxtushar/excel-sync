@@ -292,7 +292,7 @@ npm run constrain -- avyra.xlsx            # each column only accepts its type (
 npm run template -- --ods                  # avyra-template.xlsx, plus avyra-template.ods with instant city search
 ```
 
-The `.ods` city search is a macro: in LibreOffice set Tools → Options → Security → Macro Security → Medium, then click "Enable Macros" when you open the file.
+The `.ods` city search is a macro: in LibreOffice set Tools → Options → Security → Macro Security → Medium (on a Mac: LibreOffice → Settings → LibreOffice → Security), then click "Enable Macros" when you open the file.
 
 ## 6. Tests
 
