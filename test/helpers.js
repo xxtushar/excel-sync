@@ -11,7 +11,7 @@ const ExcelJS = require('exceljs');
 const config = require('../src/config');
 const { createPool } = require('../src/db');
 
-const TEST_DB = process.env.TEST_DB_NAME || 'avyra_test';
+const TEST_DB = config.testDbName;
 const DUMP = path.join(__dirname, 'fixtures', 'tusharDump.sql');
 const WORKBOOK = path.join(__dirname, 'fixtures', 'pgdump1.xlsx');
 const dbConfig = { ...config.db, database: TEST_DB };
@@ -70,9 +70,50 @@ function appendRow(ws, obj) {
   ws.insertRow(last + 1, vals);
 }
 
+/** Add a column to the sheet: header `name`, and `valuesById` ({ id: value }) in the matching rows. */
+function addColumn(ws, name, valuesById = {}) {
+  const c = ws.getRow(1).cellCount + 1;
+  ws.getRow(1).getCell(c).value = name;
+  for (const [id, v] of Object.entries(valuesById)) rowById(ws, id).getCell(c).value = v;
+}
+
+/** Run fn with some config values overridden, then put them back. */
+async function withConfig(overrides, fn) {
+  const saved = Object.fromEntries(Object.keys(overrides).map((k) => [k, config[k]]));
+  Object.assign(config, overrides);
+  try {
+    return await fn();
+  } finally {
+    Object.assign(config, saved);
+  }
+}
+
+async function columnExists(pool, table, column) {
+  const [rows] = await pool.query(
+    'SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+    [TEST_DB, table, column]
+  );
+  return rows.length > 0;
+}
+
 async function one(pool, sql, params) {
   const [rows] = await pool.query(sql, params);
   return rows[0];
 }
 
-module.exports = { TEST_DB, WORKBOOK, dbConfig, resetDb, testPool, editedWorkbook, setCell, deleteRowById, appendRow, rowById, one };
+module.exports = {
+  TEST_DB,
+  WORKBOOK,
+  dbConfig,
+  resetDb,
+  testPool,
+  editedWorkbook,
+  setCell,
+  deleteRowById,
+  appendRow,
+  addColumn,
+  rowById,
+  withConfig,
+  columnExists,
+  one,
+};

@@ -202,3 +202,83 @@ test('sheets are applied parents-first: a new PG and its room in one save', asyn
   assert.equal(r.status, 'applied', JSON.stringify(r.errors));
   assert.equal((await h.one(pool, 'SELECT pg_info FROM dy_pg_room_info WHERE id=901')).pg_info, 900);
 });
+
+test('UNKNOWN_COLUMN_MODE=add: new headers become columns, typed from their cells', async () => {
+  const buf = await h.editedWorkbook((wb) => {
+    const ws = wb.getWorksheet('dy_pg_info');
+    h.addColumn(ws, 'parking_slots', { 9: 4, 10: 12 });
+    h.addColumn(ws, 'monthly_rent', { 9: 8500.5 });
+    h.addColumn(ws, 'caretaker_phone', { 9: '09876543210' }); // typed as Text in Excel: stays text
+    h.addColumn(ws, 'My notes', { 9: 'call back' }); // not a valid column name: ignored
+  });
+  await h.withConfig({ unknownColumnMode: 'add' }, async () => {
+    const preview = await sync(buf, { dryRun: true });
+    assert.equal(preview.status, 'preview', JSON.stringify(preview.errors));
+    const t = tableOf(preview, 'dy_pg_info');
+    assert.deepEqual(t.addColumns, [
+      { name: 'parking_slots', type: 'int' },
+      { name: 'monthly_rent', type: 'decimal(15,2)' },
+      { name: 'caretaker_phone', type: 'varchar(255)' },
+    ]);
+    assert.deepEqual(t.updates.map((u) => u.id).sort((a, b) => a - b), [9, 10]);
+    assert.ok(preview.warnings.some((w) => w.column === 'My notes'));
+    assert.equal(await h.columnExists(pool, 'dy_pg_info', 'parking_slots'), false, 'a preview writes nothing');
+
+    const r = await sync(buf);
+    assert.equal(r.status, 'applied', JSON.stringify(r.errors));
+    assert.equal(r.totals.columnsAdded, 3);
+    assert.deepEqual(await h.one(pool, 'SELECT parking_slots, monthly_rent, caretaker_phone FROM dy_pg_info WHERE id=9'), {
+      parking_slots: 4,
+      monthly_rent: '8500.50',
+      caretaker_phone: '09876543210',
+    });
+    assert.equal((await h.one(pool, 'SELECT parking_slots FROM dy_pg_info WHERE id=13')).parking_slots, null);
+    assert.equal(await h.columnExists(pool, 'dy_pg_info', 'My notes'), false);
+
+    assert.ok((await sync(buf)).tables.every((x) => x.status === 'unchanged'));
+    const again = await sync(buf, { full: true });
+    assert.equal(again.status, 'no-changes', 'the added columns now compare like any other');
+  });
+});
+
+test('UNKNOWN_COLUMN_MODE=add: if the sync is rolled back, the new column is removed again', async () => {
+  const buf = await h.editedWorkbook((wb) => {
+    h.addColumn(wb.getWorksheet('dy_pg_info'), 'parking_slots', { 9: 4 });
+    h.setCell(wb.getWorksheet('dy_invoices'), 275, 'inv_amount', 1e12); // too big for DECIMAL(10,2)
+  });
+  await h.withConfig({ unknownColumnMode: 'add' }, async () => {
+    const r = await sync(buf);
+    assert.equal(r.status, 'failed');
+    assert.equal(await h.columnExists(pool, 'dy_pg_info', 'parking_slots'), false);
+  });
+});
+
+test('city column: a name (or id) is saved as the city id; unknown or ambiguous names are reported by row', async () => {
+  const ok = await h.editedWorkbook((wb) => {
+    const ws = wb.getWorksheet('dy_pg_info');
+    h.setCell(ws, 9, 'pg_city', 'Hyderabad');
+    h.setCell(ws, 10, 'pg_city', 'bilaspur (Chhattisgarh)');
+    h.setCell(ws, 13, 'pg_city', '  newdelhi ');
+    h.setCell(ws, 14, 'pg_city', '248');
+  });
+  const r = await sync(ok);
+  assert.equal(r.status, 'applied', JSON.stringify(r.errors));
+  const cities = await pool.query('SELECT id, pg_city FROM dy_pg_info WHERE id IN (9, 10, 13, 14) ORDER BY id');
+  assert.deepEqual(cities[0].map((x) => x.pg_city), [198, 52, 248, 248]);
+
+  const bad = await h.editedWorkbook((wb) => {
+    const ws = wb.getWorksheet('dy_pg_info');
+    h.setCell(ws, 9, 'pg_city', 'Delhi');
+    h.setCell(ws, 10, 'pg_city', 'bilaspur');
+    h.setCell(ws, 13, 'pg_city', '198 – Mumbai');
+    h.setCell(ws, 15, 'pg_name', 'Should not be saved');
+  });
+  const r2 = await sync(bad);
+  assert.equal(r2.status, 'invalid');
+  const byMsg = (re) => r2.errors.find((e) => e.sheet === 'dy_pg_info' && e.column === 'pg_city' && re.test(e.message));
+  assert.ok(byMsg(/"Delhi" is not in the list/), JSON.stringify(r2.errors));
+  assert.ok(byMsg(/"bilaspur" could be "bilaspur \(Chhattisgarh\)" or "bilaspur \(Himachal Pradesh\)"/), JSON.stringify(r2.errors));
+  assert.ok(byMsg(/id 198 is "Hyderabad", not "Mumbai"/));
+  assert.ok(r2.errors.every((e) => Number.isInteger(e.row)));
+  assert.notEqual((await h.one(pool, 'SELECT pg_name FROM dy_pg_info WHERE id=15')).pg_name, 'Should not be saved');
+});

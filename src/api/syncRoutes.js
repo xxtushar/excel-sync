@@ -63,7 +63,7 @@ function createSyncRouter({ engine, pool, getWatcher }) {
 
   router.post('/sync/watched-file', async (req, res) => {
     if (!fs.existsSync(config.watchFile))
-      throw new HttpError(404, `No workbook at ${config.displayPath(config.watchFile)} on the server. Set WATCH_FILE in .env.`);
+      throw new HttpError(404, `No workbook at ${config.displayPath(config.watchFile)} on the server. Set WATCH_FILE in config.json.`);
     const o = syncOptions(req);
     const result = await engine.runSync({ ...o, source: config.watchFile, sourceName: config.displayPath(config.watchFile), dryRun: truthy(req.query.dryRun), trigger: 'api' });
     res.status(HTTP_STATUS[result.status] || 200).json(toResponse(result, { details: o.details }));

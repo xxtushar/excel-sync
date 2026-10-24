@@ -1,8 +1,17 @@
 node_modules/
 .env
+# Your settings, with the database password and API key. The template is config.example.json.
+/config.json
 *.log
 ~$*.xlsx
 .DS_Store
 
 # Your live working workbook (WATCH_FILE). The reference copy is test/fixtures/pgdump1.xlsx.
 /avyra.xlsx
+# Backup made by npm run constrain
+*.xlsx.bak
+# Made by npm run template from the live database
+/avyra-template.xlsx
+/avyra-template.ods
+# LibreOffice lock files while a workbook is open
+.~lock.*#

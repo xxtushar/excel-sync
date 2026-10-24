@@ -8,7 +8,9 @@ const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 const config = require('../config');
 const { findTable } = require('../schema/introspect');
+const { isValidColumnName, inferType, pendingColumn } = require('../schema/columns');
 const { toDbValue, unwrapCell } = require('./normalize');
+const { LOOKUP_SHEET, lookupFor, resolveLookup } = require('./lookups');
 
 async function loadWorkbook(source) {
   const wb = new ExcelJS.Workbook();
@@ -45,13 +47,13 @@ function isBlank(v) {
  * @returns {{ sheets: object[], errors: object[], warnings: object[] }}
  *   errors/warnings: { sheet, row?, column?, message }
  */
-async function readWorkbook(source, schema, { onlyTables } = {}) {
+async function readWorkbook(source, schema, { onlyTables, lookups = {} } = {}) {
   const wb = await loadWorkbook(source);
   const errors = [];
   const warnings = [];
   const sheets = [];
   const seenTables = new Set();
-  const ignore = new Set(config.ignoreSheets.map((s) => s.toLowerCase()));
+  const ignore = new Set([...config.ignoreSheets, LOOKUP_SHEET].map((s) => s.toLowerCase()));
 
   for (const ws of wb.worksheets) {
     const sheetName = ws.name;
@@ -77,6 +79,7 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
     const header = ws.getRow(1);
     const colIndex = []; // [{ idx, col }]
     const seenCols = new Set();
+    const newHeaders = []; // [{ idx, name }] columns to add to the table (UNKNOWN_COLUMN_MODE=add)
     const lastCol = Math.max(ws.columnCount, header.cellCount);
     for (let c = 1; c <= lastCol; c++) {
       const raw = unwrapCell(header.getCell(c).value);
@@ -84,7 +87,16 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
       const name = String(raw).trim();
       const col = table.columnMap[name.toLowerCase()];
       if (!col) {
-        const msg = `Column "${name}" does not exist in ${table.name}; ignored.`;
+        const adding = config.unknownColumnMode === 'add';
+        if (adding && isValidColumnName(name)) {
+          if (newHeaders.some((h) => h.name.toLowerCase() === name.toLowerCase()))
+            sheetErrors.push({ sheet: sheetName, column: name, message: `Column "${name}" appears twice in the header.` });
+          else newHeaders.push({ idx: c, name });
+          continue;
+        }
+        const msg = adding
+          ? `Column "${name}" is not a valid column name (letters, digits and _ only), so it was not added; ignored.`
+          : `Column "${name}" does not exist in ${table.name}; ignored.`;
         (config.unknownColumnMode === 'error' ? sheetErrors : sheetWarnings).push({ sheet: sheetName, column: name, message: msg });
         continue;
       }
@@ -99,6 +111,18 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
       seenCols.add(col.name);
       colIndex.push({ idx: c, col });
     }
+
+    // A new column's type comes from the cells under its header; its values are then read like any other column's.
+    const newColumns = newHeaders.map(({ idx, name }) => {
+      const cells = [];
+      for (let r = 2; r <= ws.rowCount; r++) {
+        const v = ws.getRow(r).getCell(idx).value;
+        if (!isBlank(v)) cells.push(unwrapCell(v));
+      }
+      const col = pendingColumn(name, inferType(cells));
+      colIndex.push({ idx, col });
+      return col;
+    });
 
     const pk = table.primaryKey[0];
     if (!seenCols.has(pk)) {
@@ -116,7 +140,18 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
         let rowOk = true;
         const nullRequired = [];
         for (const { idx, col } of colIndex) {
-          const res = toDbValue(col, row.getCell(idx).value);
+          let cell = row.getCell(idx).value;
+          const lookup = lookupFor(table, col, lookups);
+          if (lookup && !isBlank(cell)) {
+            const hit = resolveLookup(lookup, unwrapCell(cell), col.name);
+            if (hit.error) {
+              sheetErrors.push({ sheet: sheetName, row: r, column: col.name, message: hit.error });
+              rowOk = false;
+              continue;
+            }
+            cell = hit.value;
+          }
+          const res = toDbValue(col, cell);
           if (res.error) {
             sheetErrors.push({ sheet: sheetName, row: r, column: col.name, message: res.error });
             rowOk = false;
@@ -171,7 +206,7 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
 
     errors.push(...sheetErrors);
     warnings.push(...sheetWarnings);
-    sheets.push({ sheetName, table: table.name, columns, rows, hash, hasErrors: sheetErrors.length > 0 });
+    sheets.push({ sheetName, table: table.name, columns, newColumns, rows, hash, hasErrors: sheetErrors.length > 0 });
   }
 
   return { sheets, errors, warnings };

@@ -69,7 +69,7 @@ function loadOrder(tables) {
 async function introspect(pool, database) {
   const [colRows] = await pool.query(
     `SELECT TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
-            COLUMN_DEFAULT, EXTRA, NUMERIC_SCALE, CHARACTER_MAXIMUM_LENGTH, COLUMN_KEY
+            COLUMN_DEFAULT, EXTRA, NUMERIC_SCALE, CHARACTER_MAXIMUM_LENGTH, COLUMN_KEY, COLLATION_NAME, COLUMN_COMMENT
        FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = ?
       ORDER BY TABLE_NAME, ORDINAL_POSITION`,
@@ -122,6 +122,11 @@ async function introspect(pool, database) {
       scale: r.NUMERIC_SCALE == null ? null : Number(r.NUMERIC_SCALE),
       maxLength: r.CHARACTER_MAXIMUM_LENGTH == null ? null : Number(r.CHARACTER_MAXIMUM_LENGTH),
       unsigned: /unsigned/i.test(r.COLUMN_TYPE),
+      // Kept so the column API can rebuild a definition without losing the default, collation or comment.
+      defaultValue: r.COLUMN_DEFAULT,
+      extra: r.EXTRA || '',
+      collation: r.COLLATION_NAME,
+      comment: r.COLUMN_COMMENT || '',
     };
     t.columns.push(col);
     t.columnMap[col.name.toLowerCase()] = col;

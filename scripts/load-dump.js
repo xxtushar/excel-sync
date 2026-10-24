@@ -3,11 +3,11 @@
 /**
  * Loads a mysqldump file through Node, so you don't need the `mysql` command-line client.
  *
- *   npm run load-dump                          loads test/fixtures/tusharDump.sql into DB_NAME (from .env)
+ *   npm run load-dump                          loads test/fixtures/tusharDump.sql into DB_NAME (from config.json)
  *   npm run load-dump -- path/to/dump.sql      another dump file
  *   npm run load-dump -- --force               replace a database that already has tables (DROPs them!)
  *
- * The dump's own database name is rewritten to DB_NAME, so it always lands where .env points.
+ * The dump's own database name is rewritten to DB_NAME, so it always lands where config.json points.
  */
 
 const fs = require('fs');
