@@ -252,3 +252,33 @@ test('UNKNOWN_COLUMN_MODE=add: if the sync is rolled back, the new column is rem
     assert.equal(await h.columnExists(pool, 'dy_pg_info', 'parking_slots'), false);
   });
 });
+
+test('city column: a name (or id) is saved as the city id; unknown or ambiguous names are reported by row', async () => {
+  const ok = await h.editedWorkbook((wb) => {
+    const ws = wb.getWorksheet('dy_pg_info');
+    h.setCell(ws, 9, 'pg_city', 'Hyderabad');
+    h.setCell(ws, 10, 'pg_city', 'bilaspur (Chhattisgarh)');
+    h.setCell(ws, 13, 'pg_city', '  newdelhi ');
+    h.setCell(ws, 14, 'pg_city', '248');
+  });
+  const r = await sync(ok);
+  assert.equal(r.status, 'applied', JSON.stringify(r.errors));
+  const cities = await pool.query('SELECT id, pg_city FROM dy_pg_info WHERE id IN (9, 10, 13, 14) ORDER BY id');
+  assert.deepEqual(cities[0].map((x) => x.pg_city), [198, 52, 248, 248]);
+
+  const bad = await h.editedWorkbook((wb) => {
+    const ws = wb.getWorksheet('dy_pg_info');
+    h.setCell(ws, 9, 'pg_city', 'Delhi');
+    h.setCell(ws, 10, 'pg_city', 'bilaspur');
+    h.setCell(ws, 13, 'pg_city', '198 – Mumbai');
+    h.setCell(ws, 15, 'pg_name', 'Should not be saved');
+  });
+  const r2 = await sync(bad);
+  assert.equal(r2.status, 'invalid');
+  const byMsg = (re) => r2.errors.find((e) => e.sheet === 'dy_pg_info' && e.column === 'pg_city' && re.test(e.message));
+  assert.ok(byMsg(/"Delhi" is not in the list/), JSON.stringify(r2.errors));
+  assert.ok(byMsg(/"bilaspur" could be "bilaspur \(Chhattisgarh\)" or "bilaspur \(Himachal Pradesh\)"/), JSON.stringify(r2.errors));
+  assert.ok(byMsg(/id 198 is "Hyderabad", not "Mumbai"/));
+  assert.ok(r2.errors.every((e) => Number.isInteger(e.row)));
+  assert.notEqual((await h.one(pool, 'SELECT pg_name FROM dy_pg_info WHERE id=15')).pg_name, 'Should not be saved');
+});

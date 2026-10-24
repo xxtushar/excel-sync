@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const { introspect } = require('../schema/introspect');
 const { readWorkbook } = require('../excel/readWorkbook');
+const { loadLookups } = require('../excel/lookups');
 const { buildPlan, totals } = require('./diff');
 const { applyPlan, addColumns, dropColumns, friendlyDbError } = require('./apply');
 const store = require('./store');
@@ -70,7 +71,8 @@ function createEngine(pool, dbName = config.db.database) {
     return withLock(async (conn) => {
       const schema = await getSchema(true); // pick up schema changes on every run
       const onlyTables = o.tables && o.tables.length ? new Set(o.tables) : null;
-      const workbook = await readWorkbook(o.source, schema, { onlyTables });
+      const lookups = await loadLookups(conn, schema);
+      const workbook = await readWorkbook(o.source, schema, { onlyTables, lookups });
       // The remembered hash covers the sheet content AND the delete mode, so re-running an unchanged sheet with
       // deleteMode=hard (after a soft run kept some rows) is not skipped.
       for (const s of workbook.sheets) s.hash = crypto.createHash('sha256').update(`${s.hash}|${deleteMode}`).digest('hex');

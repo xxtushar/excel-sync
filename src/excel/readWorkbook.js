@@ -10,6 +10,7 @@ const config = require('../config');
 const { findTable } = require('../schema/introspect');
 const { isValidColumnName, inferType, pendingColumn } = require('../schema/columns');
 const { toDbValue, unwrapCell } = require('./normalize');
+const { LOOKUP_SHEET, lookupFor, resolveLookup } = require('./lookups');
 
 async function loadWorkbook(source) {
   const wb = new ExcelJS.Workbook();
@@ -46,13 +47,13 @@ function isBlank(v) {
  * @returns {{ sheets: object[], errors: object[], warnings: object[] }}
  *   errors/warnings: { sheet, row?, column?, message }
  */
-async function readWorkbook(source, schema, { onlyTables } = {}) {
+async function readWorkbook(source, schema, { onlyTables, lookups = {} } = {}) {
   const wb = await loadWorkbook(source);
   const errors = [];
   const warnings = [];
   const sheets = [];
   const seenTables = new Set();
-  const ignore = new Set(config.ignoreSheets.map((s) => s.toLowerCase()));
+  const ignore = new Set([...config.ignoreSheets, LOOKUP_SHEET].map((s) => s.toLowerCase()));
 
   for (const ws of wb.worksheets) {
     const sheetName = ws.name;
@@ -139,7 +140,18 @@ async function readWorkbook(source, schema, { onlyTables } = {}) {
         let rowOk = true;
         const nullRequired = [];
         for (const { idx, col } of colIndex) {
-          const res = toDbValue(col, row.getCell(idx).value);
+          let cell = row.getCell(idx).value;
+          const lookup = lookupFor(table, col, lookups);
+          if (lookup && !isBlank(cell)) {
+            const hit = resolveLookup(lookup, unwrapCell(cell), col.name);
+            if (hit.error) {
+              sheetErrors.push({ sheet: sheetName, row: r, column: col.name, message: hit.error });
+              rowOk = false;
+              continue;
+            }
+            cell = hit.value;
+          }
+          const res = toDbValue(col, cell);
           if (res.error) {
             sheetErrors.push({ sheet: sheetName, row: r, column: col.name, message: res.error });
             rowOk = false;

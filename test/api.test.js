@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const express = require('express');
+const ExcelJS = require('exceljs');
 const { createExcelSync } = require('../src');
 const h = require('./helpers');
 
@@ -152,6 +153,36 @@ test('export → re-upload is a no-op', async () => {
   const r = await (await upload('/sync?full=true', buf, 'export.xlsx')).json();
   assert.equal(r.status, 'no-changes', JSON.stringify(r.errors));
   assert.equal(r.unchangedSheets.length, 51);
+});
+
+test('the export only lets each column take its type', async () => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await (await fetch(`${base}/export`)).arrayBuffer());
+  const ws = wb.getWorksheet('dy_invoices');
+  const at = (header) => {
+    const c = ws.getRow(1).values.indexOf(header);
+    return ws.dataValidations.find(`${ws.getColumn(c).letter}2`);
+  };
+  assert.equal(at('id').type, 'whole');
+  assert.equal(at('inv_id').type, 'textLength');
+  assert.equal(at('inv_total').type, 'decimal');
+  assert.equal(at('inv_datetime').type, 'custom');
+  assert.equal(at('id').errorStyle, 'stop');
+  // Blank rows below the data are covered too, for new rows.
+  assert.equal(ws.dataValidations.find(`A${ws.rowCount + 500}`).type, 'whole');
+
+  // The city column is a dropdown of city names from the hidden Lookups sheet (ids beside them), and its cells hold the name.
+  const lookups = wb.getWorksheet('Lookups');
+  assert.equal(lookups.state, 'hidden');
+  assert.equal(lookups.getCell('A2').value, 'amaravati');
+  assert.equal(lookups.getCell('B2').value, 1);
+  const pg = wb.getWorksheet('dy_pg_info');
+  const city = pg.getColumn(pg.getRow(1).values.indexOf('pg_city')).letter;
+  const rule = pg.dataValidations.find(`${city}2`);
+  assert.equal(rule.type, 'list');
+  assert.equal(rule.errorStyle, 'stop');
+  assert.match(rule.formulae[0], /^Lookups!\$A\$2:\$A\$\d+$/);
+  assert.match(pg.getCell(`${city}2`).value, /^[^\d]/);
 });
 
 test('API key is enforced when configured', async () => {

@@ -3,11 +3,14 @@
  * Writes the current database back out as a workbook in the same layout the sync reads:
  * one sheet per table, row 1 = column names, static tabs blue, dynamic tabs green.
  * Use it to refresh your Excel after changes made through the table API.
+ * Every column is validated against its MySQL type (validation.js), so Excel refuses a value of the wrong type.
  */
 
 const ExcelJS = require('exceljs');
 const { q } = require('../db');
 const { fromDbValue } = require('./normalize');
+const { addValidation } = require('./validation');
+const { loadLookups, lookupFor, addLookupSheet } = require('./lookups');
 
 async function exportWorkbook(pool, schema, { tables } = {}) {
   const wb = new ExcelJS.Workbook();
@@ -24,9 +27,14 @@ async function exportWorkbook(pool, schema, { tables } = {}) {
   readme.addRow([]);
   readme.addRow(['Each sheet = one table. Row 1 = exact column names. Empty cell = NULL. Keep the id column; give new rows a new id.']);
   readme.addRow(['Static (st_, blue) tables are never deleted from by sync. Rows removed from dynamic (dy_, green) sheets are soft-deleted where the table supports it.']);
+  readme.addRow(['Each column only accepts its type (whole number, number, date, text up to its length). Click a cell to see what it takes.']);
+  readme.addRow([]);
+  readme.addRow(['City columns are a dropdown of city names; the import saves the matching id. The names and ids are on the hidden Lookups sheet.']);
   readme.addRow([]);
   const h = readme.addRow(['#', 'Table (sheet)', 'Type', 'Rows']);
   h.font = { bold: true };
+  const lookups = await loadLookups(pool, schema);
+  const lookupRanges = addLookupSheet(wb, lookups);
 
   for (const [i, name] of names.entries()) {
     const t = schema.tables[name];
@@ -52,11 +60,16 @@ async function exportWorkbook(pool, schema, { tables } = {}) {
         cols.map((c) => {
           const v = fromDbValue(c, r[c.name]);
           if (v === null) return null;
+          const lookup = lookupFor(t, c, lookups);
+          const hit = lookup && lookup.find((x) => x.id === Number(v));
+          if (hit) return hit.label; // matches the dropdown entry; the import turns it back into the id
+
           if (c.kind === 'decimal' || c.kind === 'float') return Number(v);
           return v;
         })
       );
     }
+    addValidation(ws, t, rows.length + 1, lookupRanges);
   }
   return wb.xlsx.writeBuffer();
 }

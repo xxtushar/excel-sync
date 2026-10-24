@@ -120,6 +120,30 @@ read schema from MySQL ─► read workbook ─► diff each sheet vs its table 
 - **Extra columns** (e.g. your own notes) are ignored with a warning, unless `UNKNOWN_COLUMN_MODE=add` (below).
 - Text is stored exactly as typed, including trailing spaces. The dump already contains some (e.g. `dy_user` ids 10 and 12, `last_name`).
 
+### Each column only takes its type
+
+Workbooks from `GET /api/export`, and any workbook you run `npm run constrain` on, carry Excel data validation built from each column's MySQL type. Excel and LibreOffice refuse a value of the wrong type as you type it, and clicking a cell shows what its column takes:
+
+| MySQL type | The cell accepts |
+|---|---|
+| `int`, `tinyint`, `smallint`, `bigint`, `year`… | a whole number within the type's range (`tinyint`: −128 to 127; `int`: about ±2.1 billion; unsigned: from 0) |
+| `decimal(p,s)` | a number that fits: `decimal(10,2)` is −99,999,999.99 to 99,999,999.99 |
+| `float`, `double` | any number |
+| `varchar(n)`, `char(n)`, `text`… | text of at most n characters |
+| `enum(...)` | a dropdown of its values |
+| `datetime`, `timestamp` | `2026-08-25 16:55:13`, `2026-08-25 16:55`, `2026-08-25`, or a real Excel date |
+| `date` | `2026-08-25` or a real Excel date |
+| `json` | text |
+
+The note on a cell also says when the column is required, and which table an id must exist in. The rules cover the rows with data plus 1,000 blank rows below them for new rows. They don't cover whole columns, because the sync would then read a million rules per column. Excel doesn't check values that are pasted in, so the sync still checks every cell before it writes anything.
+
+```bash
+npm run constrain -- avyra.xlsx                      # add the rules in place (the original is kept as avyra.xlsx.bak)
+npm run constrain -- avyra.xlsx --out=checked.xlsx   # or write a new file
+```
+
+Close the workbook in Excel or LibreOffice first. Saving the old copy from there would drop the rules again. Run it again after adding columns, or after adding more than 1,000 rows.
+
 ### Adding columns from the workbook (`UNKNOWN_COLUMN_MODE=add`)
 
 With `"UNKNOWN_COLUMN_MODE": "add"` in `config.json`, a header that isn't a column yet becomes a new column on the next sync. Type a header such as `parking_slots` in the next free column of the sheet, fill in the rows that need a value, and save.
@@ -264,11 +288,15 @@ npm run sync -- avyra.xlsx --dry-run
 npm run sync -- avyra.xlsx
 npm run sync -- avyra.xlsx --delete-mode=hard --tables=dy_pg_events_info
 npm run sync -- avyra.xlsx --full --json > result.json
+npm run constrain -- avyra.xlsx            # each column only accepts its type (section 2)
+npm run template -- --ods                  # avyra-template.xlsx, plus avyra-template.ods with instant city search
 ```
+
+The `.ods` city search is a macro: in LibreOffice set Tools → Options → Security → Macro Security → Medium, then click "Enable Macros" when you open the file.
 
 ## 6. Tests
 
-`npm test` runs 4 settings tests and 24 integration tests against a throwaway database (`TEST_DB_NAME`, default `avyra_test`). It is rebuilt from `test/fixtures/tusharDump.sql` before every test, so your real `avyra` DB is never touched. The DB user needs permission to create and drop that database. The tests cover:
+`npm test` runs 6 unit tests (settings, cell validation) and 25 integration tests against a throwaway database (`TEST_DB_NAME`, default `avyra_test`). It is rebuilt from `test/fixtures/tusharDump.sql` before every test, so your real `avyra` DB is never touched. The DB user needs permission to create and drop that database. The tests cover:
 
 - The untouched workbook matches the dump exactly: all 51 sheets, 2,209 rows, zero differences.
 - Edits, new rows, soft deletes, the static-table protection, and idempotency.
@@ -278,6 +306,7 @@ npm run sync -- avyra.xlsx --full --json > result.json
 - A MySQL error rolls back the whole sync.
 - Parent and child rows added in one save.
 - Every API route, export → re-import being a no-op, the API key, and the file watcher reacting to a save.
+- Every column of an export only accepting its type, and those rules being replaced, not duplicated, when added again.
 - Adding columns from the workbook (types, preview, removed again on rollback), and the column API: add, rename, retype, drop, and every refusal.
 
 ## 7. Layout
@@ -291,6 +320,7 @@ src/
   schema/columns.js         allowed column types, type inference for new sheet columns, column DDL
   excel/readWorkbook.js     workbook → validated rows per table
   excel/normalize.js        cell/JSON value → MySQL shape (ints, decimals, dates, text)
+  excel/validation.js       Excel data validation from each column's MySQL type
   excel/exportWorkbook.js   DB → workbook
   sync/diff.js              build the change plan + FK / cascade / mass-delete checks
   sync/cascade.js           what a hard delete would take with it
@@ -306,6 +336,7 @@ src/
   index.js                  createExcelSync() for embedding
   server.js                 standalone server
 scripts/sync-file.js        CLI
+scripts/constrain-workbook.js  add the type rules to an existing workbook
 test/                       integration tests + fixtures (your dump and workbook)
 ```
 
