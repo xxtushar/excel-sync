@@ -20,6 +20,7 @@ function unwrapCell(v) {
   if (v === null || v === undefined) return null;
   if (v instanceof Date || typeof v !== 'object') return v;
   if ('result' in v) return unwrapCell(v.result); // formula / shared formula
+  if ('formula' in v || 'sharedFormula' in v) return null; // formula never calculated (no saved result yet)
   if (Array.isArray(v.richText)) return v.richText.map((p) => p.text).join('');
   if ('text' in v) return unwrapCell(v.text); // hyperlink
   if ('error' in v) return { __error: v.error };
