@@ -1,24 +1,19 @@
 {
-  "name": "avyra-excel-sync",
-  "version": "1.0.0",
-  "description": "Keeps the avyra MySQL database in sync with an Excel workbook, plus a REST API to maintain it.",
-  "main": "src/index.js",
+  "name": "avyra-excel-upload",
+  "version": "2.0.0",
+  "description": "Checks an avyra Excel workbook and makes it ready to upload in the admin UI. Never connects to or writes to a database.",
+  "main": "src/upload/prepare.js",
   "scripts": {
-    "start": "node src/server.js",
-    "sync": "node scripts/sync-file.js",
-    "constrain": "node scripts/constrain-workbook.js",
-    "template": "node scripts/export-template.js",
-    "test": "node --test --test-concurrency=1 test/config.test.js test/validation.test.js test/sync.test.js test/api.test.js",
-    "load-dump": "node scripts/load-dump.js"
+    "check-upload": "node scripts/check-upload.js",
+    "schema": "node scripts/build-schema.js",
+    "test": "node --test test/config.test.js test/validation.test.js test/upload.test.js",
+    "test:upload": "node --test test/upload.test.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "chokidar": "^4.0.3",
     "dotenv": "^18.0.5",
     "exceljs": "^4.4.0",
-    "express": "^5.2.1",
-    "multer": "^2.4.0",
-    "mysql2": "^3.24.5"
+    "jszip": "^3.10.2"
   },
   "private": true,
   "engines": {

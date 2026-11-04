@@ -126,7 +126,7 @@ const titleOf = (col) => `${col.name} (${col.columnType})`.slice(0, 32);
  * @param {import('exceljs').Worksheet} ws
  * @param {object} t        table from introspect
  * @param {number} lastRow  last row holding data (1 when the sheet is empty)
- * @param {object} [lookupRanges]  table → list range (lookups.js); a foreign key to one of them becomes a dropdown
+ * @param {object} [lookupRanges]  table (or "table.column") → list range (lookups.js); such a foreign key becomes a dropdown
  * @returns {number} columns validated
  */
 function addValidation(ws, t, lastRow, lookupRanges = {}) {
@@ -139,15 +139,15 @@ function addValidation(ws, t, lastRow, lookupRanges = {}) {
     const letter = ws.getColumn(c).letter;
     clearColumn(ws, letter);
     const fk = t.foreignKeys.find((f) => f.column === col.name);
-    const list = fk && lookupRanges[fk.refTable];
+    const list = fk && (lookupRanges[`${t.name}.${col.name}`] || lookupRanges[fk.refTable]);
     const r = list
-      ? { takes: `a name from the ${fk.refTable} dropdown`, rule: { type: 'list', formulae: [list] } }
+      ? { takes: `an entry from the ${fk.refTable} dropdown (type its id or name to find it)`, rule: { type: 'list', formulae: [list] } }
       : columnRule(col, `${letter}2`);
     if (!r) continue;
     const notes = [
       `Takes ${r.takes}.`,
       fk ? `Must be an id in ${fk.refTable}.` : '',
-      col.name === t.primaryKey[0] ? 'Row id: unique, never reuse one.' : '',
+      col.name === t.primaryKey[0] ? 'Row id: unique, never reuse one. New rows get the next id automatically.' : '',
       col.nullable || col.autoIncrement ? '' : 'Required.',
     ].filter(Boolean);
     ws.dataValidations.add(`${letter}2:${letter}${end}`, {
@@ -173,10 +173,11 @@ function clearColumn(ws, letter) {
   for (const key of Object.keys(model)) if (re.test(key)) delete model[key];
 }
 
-/** Last row with anything in the first column (the id), ignoring trailing blank rows. */
+/** Last row with anything in the first column (the id), ignoring trailing blank rows and empty auto-id formulas. */
 function lastDataRow(ws) {
   for (let r = ws.rowCount; r > 1; r--) {
-    const v = ws.getRow(r).getCell(1).value;
+    let v = ws.getRow(r).getCell(1).value;
+    if (v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v)) v = v.result; // auto-id formula of a blank row
     if (v !== null && v !== undefined && v !== '') return r;
   }
   return 1;
