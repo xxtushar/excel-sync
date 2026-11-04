@@ -181,38 +181,4 @@ function rangeCheck(col, n) {
   return { value: n };
 }
 
-/** Normalise a value read from MySQL into the same shape toDbValue produces. */
-function fromDbValue(col, v) {
-  if (v === null || v === undefined) return null;
-  switch (col.kind) {
-    case 'integer':
-      return typeof v === 'number' ? v : Number.isSafeInteger(Number(v)) ? Number(v) : String(v);
-    case 'float':
-      return Number(v);
-    case 'decimal':
-      return Number(v).toFixed(col.scale ?? 0);
-    case 'datetime':
-      return String(v).replace(/\.\d+$/, '');
-    case 'date':
-      return String(v).slice(0, 10);
-    case 'json':
-      return typeof v === 'string' ? v : JSON.stringify(v);
-    default:
-      return Buffer.isBuffer(v) ? v.toString('utf8') : String(v);
-  }
-}
-
-function sameValue(col, a, b) {
-  if (a === null || b === null) return a === b;
-  if (col.kind === 'float') return Math.abs(Number(a) - Number(b)) <= 1e-9 * Math.max(1, Math.abs(Number(a)));
-  if (col.kind === 'json') {
-    try {
-      return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
-    } catch {
-      return a === b;
-    }
-  }
-  return String(a) === String(b);
-}
-
-module.exports = { toDbValue, fromDbValue, sameValue, unwrapCell, parseDatetimeString };
+module.exports = { toDbValue, unwrapCell };

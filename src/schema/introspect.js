@@ -1,11 +1,8 @@
 'use strict';
 /**
- * Reads the live schema from INFORMATION_SCHEMA so nothing about the 51 tables is hardcoded.
- * Produces, per table: columns + types, primary key, outgoing FKs, incoming FKs (children),
- * soft-delete columns, static/dynamic kind, and a load order (parents before children).
+ * Schema helpers shared by fromDump.js: the kind of each MySQL column type, and a load order
+ * (parents before children).
  */
-
-const config = require('../config');
 
 const INTEGER_TYPES = new Set(['tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint', 'year']);
 const FLOAT_TYPES = new Set(['float', 'double', 'real']);
@@ -24,12 +21,6 @@ function kindOf(dataType) {
   if (dataType === 'json') return 'json';
   if (dataType === 'bit') return 'integer';
   return 'string';
-}
-
-function tableKind(name) {
-  if (name.startsWith(config.staticPrefix)) return 'static';
-  if (name.startsWith(config.dynamicPrefix)) return 'dynamic';
-  return null;
 }
 
 /**
@@ -66,125 +57,4 @@ function loadOrder(tables) {
   return { order: order.concat(cyclic.sort()), cyclic };
 }
 
-async function introspect(pool, database) {
-  const [colRows] = await pool.query(
-    `SELECT TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
-            COLUMN_DEFAULT, EXTRA, NUMERIC_SCALE, CHARACTER_MAXIMUM_LENGTH, COLUMN_KEY, COLLATION_NAME, COLUMN_COMMENT
-       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
-      ORDER BY TABLE_NAME, ORDINAL_POSITION`,
-    [database]
-  );
-  const [fkRows] = await pool.query(
-    `SELECT TABLE_NAME, COLUMN_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
-       FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-      WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
-    [database]
-  );
-  const [ruleRows] = await pool.query(
-    `SELECT CONSTRAINT_NAME, TABLE_NAME, DELETE_RULE, UPDATE_RULE
-       FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
-      WHERE CONSTRAINT_SCHEMA = ?`,
-    [database]
-  );
-  const [uniqueRows] = await pool.query(
-    `SELECT TABLE_NAME, INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS cols
-       FROM INFORMATION_SCHEMA.STATISTICS
-      WHERE TABLE_SCHEMA = ? AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY'
-      GROUP BY TABLE_NAME, INDEX_NAME`,
-    [database]
-  );
-
-  const tables = {};
-  for (const r of colRows) {
-    const kind = tableKind(r.TABLE_NAME);
-    if (!kind) continue;
-    const t = (tables[r.TABLE_NAME] ||= {
-      name: r.TABLE_NAME,
-      kind,
-      columns: [],
-      columnMap: {},
-      primaryKey: [],
-      foreignKeys: [],
-      children: [],
-      uniqueKeys: [],
-      softDeleteColumns: [],
-    });
-    const col = {
-      name: r.COLUMN_NAME,
-      dataType: r.DATA_TYPE,
-      columnType: r.COLUMN_TYPE,
-      kind: kindOf(r.DATA_TYPE),
-      nullable: r.IS_NULLABLE === 'YES',
-      hasDefault: r.COLUMN_DEFAULT !== null || r.IS_NULLABLE === 'YES' || /auto_increment|DEFAULT_GENERATED/i.test(r.EXTRA),
-      autoIncrement: /auto_increment/i.test(r.EXTRA),
-      generated: /VIRTUAL GENERATED|STORED GENERATED/i.test(r.EXTRA),
-      scale: r.NUMERIC_SCALE == null ? null : Number(r.NUMERIC_SCALE),
-      maxLength: r.CHARACTER_MAXIMUM_LENGTH == null ? null : Number(r.CHARACTER_MAXIMUM_LENGTH),
-      unsigned: /unsigned/i.test(r.COLUMN_TYPE),
-      // Kept so the column API can rebuild a definition without losing the default, collation or comment.
-      defaultValue: r.COLUMN_DEFAULT,
-      extra: r.EXTRA || '',
-      collation: r.COLLATION_NAME,
-      comment: r.COLUMN_COMMENT || '',
-    };
-    t.columns.push(col);
-    t.columnMap[col.name.toLowerCase()] = col;
-    if (r.COLUMN_KEY === 'PRI') t.primaryKey.push(col.name);
-  }
-
-  const rules = Object.fromEntries(ruleRows.map((r) => [`${r.TABLE_NAME}.${r.CONSTRAINT_NAME}`, r]));
-  for (const r of fkRows) {
-    const t = tables[r.TABLE_NAME];
-    if (!t) continue;
-    const rule = rules[`${r.TABLE_NAME}.${r.CONSTRAINT_NAME}`] || {};
-    const fk = {
-      constraint: r.CONSTRAINT_NAME,
-      column: r.COLUMN_NAME,
-      refTable: r.REFERENCED_TABLE_NAME,
-      refColumn: r.REFERENCED_COLUMN_NAME,
-      onDelete: rule.DELETE_RULE || 'RESTRICT',
-      onUpdate: rule.UPDATE_RULE || 'RESTRICT',
-    };
-    t.foreignKeys.push(fk);
-    if (tables[fk.refTable]) tables[fk.refTable].children.push({ table: t.name, ...fk });
-  }
-
-  for (const r of uniqueRows) {
-    const t = tables[r.TABLE_NAME];
-    if (!t) continue;
-    const cols = String(r.cols).split(',');
-    // A unique index on just the primary key adds nothing.
-    if (cols.length === 1 && t.primaryKey.length === 1 && cols[0] === t.primaryKey[0]) continue;
-    t.uniqueKeys.push({ name: r.INDEX_NAME, columns: cols });
-  }
-
-  const problems = [];
-  for (const t of Object.values(tables)) {
-    const lower = t.columns.map((c) => c.name.toLowerCase());
-    for (const sd of config.softDeleteColumns) {
-      const i = lower.indexOf(sd.toLowerCase());
-      if (i >= 0) t.softDeleteColumns.push(t.columns[i].name);
-    }
-    if (t.primaryKey.length !== 1) {
-      problems.push(`${t.name}: needs a single-column primary key (has ${t.primaryKey.length}); it will be read-only.`);
-      t.readOnly = true;
-    }
-  }
-
-  const { order, cyclic } = loadOrder(tables);
-  order.forEach((n, i) => (tables[n].order = i));
-  if (cyclic.length) problems.push(`FK cycle between: ${cyclic.join(', ')}. These load last.`);
-
-  return { database, tables, order, problems, loadedAt: new Date().toISOString() };
-}
-
-/** Case-insensitive table lookup restricted to managed (st_/dy_) tables. */
-function findTable(schema, name) {
-  if (!name) return null;
-  if (schema.tables[name]) return schema.tables[name];
-  const lower = String(name).toLowerCase();
-  return Object.values(schema.tables).find((t) => t.name.toLowerCase() === lower) || null;
-}
-
-module.exports = { introspect, findTable, loadOrder, kindOf };
+module.exports = { loadOrder, kindOf };

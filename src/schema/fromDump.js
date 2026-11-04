@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Builds the same schema object as introspect.js, but from a mysqldump file instead of a live database.
+ * Builds the schema object from a mysqldump file.
  * The upload checker uses it so it never needs a database connection: columns, types, required flags, primary
  * keys, foreign keys and unique keys all come from the CREATE TABLE statements.
  *
@@ -54,7 +54,7 @@ function parseColumn(line) {
   };
 }
 
-/** @param {string} sql  the whole dump  @returns {object} schema (same shape as introspect()) */
+/** @param {string} sql  the whole dump  @returns {object} schema */
 function schemaFromDump(sql, database = config.db.database) {
   const tables = {};
   const re = /CREATE TABLE `((?:[^`]|``)+)` \(([\s\S]*?)\n\)([^;]*);/g;

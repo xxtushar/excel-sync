@@ -124,7 +124,7 @@ const titleOf = (col) => `${col.name} (${col.columnType})`.slice(0, 32);
  * Validates every column of `t` found in the sheet's header row, from row 2 down to `lastRow` + EXTRA_ROWS.
  * Validation this function wrote earlier on those columns is replaced; other validation is left alone.
  * @param {import('exceljs').Worksheet} ws
- * @param {object} t        table from introspect
+ * @param {object} t        table from schemaFromDump
  * @param {number} lastRow  last row holding data (1 when the sheet is empty)
  * @param {object} [lookupRanges]  table (or "table.column") → list range (lookups.js); such a foreign key becomes a dropdown
  * @returns {number} columns validated

@@ -5,91 +5,37 @@
  *   2. config.json in the project folder (or the file named by CONFIG_FILE)
  *   3. .env in the project folder (or the file named by DOTENV_CONFIG_PATH)
  *   4. the default below
- * config.json holds typed JSON values (3306, not "3306"); the environment and .env hold text, which is parsed
+ * config.json holds typed JSON values (["a", "b"], not "a,b"); the environment and .env hold text, which is parsed
  * into the same types. Any value of the wrong type, and any unknown key in config.json, stops startup.
  */
 
 const SETTINGS = {
-  // Database
-  DB_HOST: { type: 'string', default: 'localhost' },
-  DB_PORT: { type: 'int', default: 3306, min: 1, max: 65535 },
-  DB_USER: { type: 'string', default: 'root' },
-  DB_PASSWORD: { type: 'string', default: '', empty: true, secret: true },
+  // Database name written into schema/avyra.schema.json (a label only, nothing connects to it)
   DB_NAME: { type: 'string', default: 'avyra' },
 
-  // API
-  PORT: { type: 'int', default: 4000, min: 1, max: 65535 },
-  API_KEY: { type: 'string', default: '', empty: true, secret: true },
-  MAX_UPLOAD_MB: { type: 'int', default: 20, min: 1 },
-  PAGE_LIMIT_MAX: { type: 'int', default: 500, min: 1 },
-
-  // File watcher
-  WATCH_FILE: { type: 'string', default: 'avyra.xlsx' },
-  WATCH_ENABLED: { type: 'bool', default: true },
-  WATCH_DEBOUNCE_MS: { type: 'int', default: 2000, min: 0 },
-  WATCH_POLL: { type: 'bool', default: false },
-
-  // Sync rules
-  DELETE_MODE: { type: 'enum', values: ['soft', 'hard', 'none'], default: 'soft' },
+  // Which tables and sheets the check looks at
   SOFT_DELETE_COLUMNS: { type: 'list', default: ['is_active', 'rstatus', 'active'] },
-  BLANK_ID_MODE: { type: 'enum', values: ['reject', 'insert'], default: 'reject' },
-  UNKNOWN_COLUMN_MODE: { type: 'enum', values: ['warn', 'error', 'add'], default: 'warn' },
   IGNORE_SHEETS: { type: 'list', default: ['_README'] },
   STATIC_PREFIX: { type: 'string', default: 'st_' },
   DYNAMIC_PREFIX: { type: 'string', default: 'dy_' },
-
-  // Tests only
-  TEST_DB_NAME: { type: 'string', default: 'avyra_test' },
 };
 
-const TRUE = new Set(['1', 'true', 'yes', 'on']);
-const FALSE = new Set(['0', 'false', 'no', 'off']);
 const BAD = Symbol('bad');
 
 /** What a setting must look like, for error messages. */
 function expected(s, fromJson) {
-  switch (s.type) {
-    case 'int': {
-      const range =
-        s.max !== undefined ? ` from ${s.min} to ${s.max}` : s.min !== undefined ? ` of at least ${s.min}` : '';
-      return `a whole number${range}${fromJson ? ' (no quotes)' : ''}`;
-    }
-    case 'bool':
-      return fromJson ? 'true or false (no quotes)' : 'true or false';
-    case 'list':
-      return fromJson ? 'a list of names, like ["a", "b"]' : 'a comma-separated list of names';
-    case 'enum':
-      return `one of ${s.values.map((v) => `"${v}"`).join(', ')}`;
-    default:
-      return fromJson ? 'text in quotes' : 'text';
-  }
+  if (s.type === 'list') return fromJson ? 'a list of names, like ["a", "b"]' : 'a comma-separated list of names';
+  return fromJson ? 'text in quotes' : 'text';
 }
 
 function fromJson(s, v) {
-  switch (s.type) {
-    case 'int':
-      return Number.isInteger(v) ? v : BAD;
-    case 'bool':
-      return typeof v === 'boolean' ? v : BAD;
-    case 'list':
-      return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.map((x) => x.trim()).filter(Boolean) : BAD;
-    default:
-      return typeof v === 'string' ? v.trim() : BAD;
-  }
+  if (s.type === 'list') return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.map((x) => x.trim()).filter(Boolean) : BAD;
+  return typeof v === 'string' ? v.trim() : BAD;
 }
 
 function fromText(s, text) {
   const t = text.trim();
-  switch (s.type) {
-    case 'int':
-      return /^-?\d+$/.test(t) ? Number(t) : BAD;
-    case 'bool':
-      return TRUE.has(t.toLowerCase()) ? true : FALSE.has(t.toLowerCase()) ? false : BAD;
-    case 'list':
-      return t.split(',').map((x) => x.trim()).filter(Boolean);
-    default:
-      return s.secret ? text : t; // a password may start or end with a space
-  }
+  return s.type === 'list' ? t.split(',').map((x) => x.trim()).filter(Boolean) : t;
 }
 
 /** The setting name within two typos of `key` (case ignored), for "did you mean". */
@@ -115,10 +61,7 @@ function editDistance(a, b) {
 }
 
 function inRange(s, v) {
-  if (s.type === 'int') return (s.min === undefined || v >= s.min) && (s.max === undefined || v <= s.max);
-  if (s.type === 'enum') return s.values.includes(v);
-  if (s.type === 'string') return s.empty || v !== '';
-  return true;
+  return s.type !== 'string' || v !== '';
 }
 
 /**
@@ -145,7 +88,7 @@ function resolveSettings({ env = {}, json = null, dotenv = {}, jsonName = 'confi
   }
 
   for (const [name, s] of Object.entries(SETTINGS)) {
-    // An empty variable counts as not set, so `DB_HOST=` in .env falls through to the default.
+    // An empty variable counts as not set, so `DB_NAME=` in .env falls through to the default.
     const candidates = [
       [env[name], 'the environment', false],
       [json ? json[name] : undefined, jsonName, true],
@@ -160,8 +103,7 @@ function resolveSettings({ env = {}, json = null, dotenv = {}, jsonName = 'confi
     const [raw, where, typed] = hit;
     const v = typed ? fromJson(s, raw) : fromText(s, String(raw));
     if (v === BAD || !inRange(s, v)) {
-      const shown = s.secret ? `a ${Array.isArray(raw) ? 'list' : typeof raw}` : JSON.stringify(raw);
-      errors.push(`${name} in ${where} must be ${expected(s, typed)}, got ${shown}.`);
+      errors.push(`${name} in ${where} must be ${expected(s, typed)}, got ${JSON.stringify(raw)}.`);
       values[name] = s.default;
       sources[name] = 'default';
       continue;

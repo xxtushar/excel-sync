@@ -5,7 +5,7 @@ const ExcelJS = require('exceljs');
 const { columnRule, addValidation, lastDataRow, EXTRA_ROWS } = require('../src/excel/validation');
 const { kindOf } = require('../src/schema/introspect');
 
-/** A column the way introspect describes it, from its MySQL type. */
+/** A column the way schemaFromDump describes it, from its MySQL type. */
 function col(name, columnType, extra = {}) {
   const dataType = columnType.replace(/\(.*$/, '').replace(/ unsigned$/, '');
   const len = /^(var)?char\((\d+)\)/.exec(columnType);
