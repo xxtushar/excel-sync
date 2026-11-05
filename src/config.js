@@ -46,7 +46,7 @@ function loadSettings() {
     } catch (e) {
       throw new ConfigError([`${jsonName} is not valid JSON: ${e.message}`]);
     }
-    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new ConfigError([`${jsonName} must hold one JSON object: { "STATIC_PREFIX": "st_", ... }`]);
+    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new ConfigError([`${jsonName} must hold one JSON object: { "DB_USER": "root", ... }`]);
   }
   const dotenvText = readOptional(dotenvFile, !!process.env.DOTENV_CONFIG_PATH);
 
@@ -64,7 +64,11 @@ function loadSettings() {
 const env = loadSettings();
 
 const config = {
-  db: { database: env.DB_NAME },
+  db: { host: env.DB_HOST, port: env.DB_PORT, user: env.DB_USER, password: env.DB_PASSWORD, database: env.DB_NAME },
+  port: env.PORT,
+  apiKey: env.API_KEY,
+  maxUploadMb: env.MAX_UPLOAD_MB,
+  previewMinutes: env.PREVIEW_MINUTES,
 
   // Table naming: which prefixes count as static / dynamic. Anything else is ignored.
   staticPrefix: env.STATIC_PREFIX,

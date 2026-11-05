@@ -1,19 +1,24 @@
 {
   "name": "avyra-excel-upload",
-  "version": "2.0.0",
-  "description": "Checks an avyra Excel workbook and makes it ready to upload in the admin UI. Never connects to or writes to a database.",
-  "main": "src/upload/prepare.js",
+  "version": "3.0.0",
+  "description": "Checks avyra Excel workbooks and lets the admin UI upload them to the database through a preview-then-save API.",
+  "main": "src/api/router.js",
   "scripts": {
     "check-upload": "node scripts/check-upload.js",
     "schema": "node scripts/build-schema.js",
-    "test": "node --test test/config.test.js test/validation.test.js test/upload.test.js",
-    "test:upload": "node --test test/upload.test.js"
+    "test": "node --test --test-concurrency=1 test/config.test.js test/validation.test.js test/upload.test.js test/api.test.js",
+    "test:upload": "node --test test/upload.test.js",
+    "start": "node src/api/server.js",
+    "test:api": "node --test test/api.test.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
     "dotenv": "^18.0.5",
     "exceljs": "^4.4.0",
-    "jszip": "^3.10.2"
+    "express": "^5.3.0",
+    "jszip": "^3.10.2",
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6"
   },
   "private": true,
   "engines": {

@@ -10,8 +10,20 @@
  */
 
 const SETTINGS = {
-  // Database name written into schema/avyra.schema.json (a label only, nothing connects to it)
+  // Database the admin upload API reads and writes. The check-upload command never connects to it.
+  DB_HOST: { type: 'string', default: 'localhost' },
+  DB_PORT: { type: 'int', min: 1, max: 65535, default: 3306 },
+  DB_USER: { type: 'string', default: 'root' },
+  DB_PASSWORD: { type: 'secret', default: '' },
   DB_NAME: { type: 'string', default: 'avyra' },
+
+  // The standalone API server (npm start). A backend that mounts the router uses its own port and login.
+  PORT: { type: 'int', min: 1, max: 65535, default: 4000 },
+  // When set, every request to the standalone server needs the header  x-api-key: <this value>
+  API_KEY: { type: 'secret', default: '' },
+  MAX_UPLOAD_MB: { type: 'int', min: 1, max: 200, default: 20 },
+  // How long a preview's confirmation token stays valid
+  PREVIEW_MINUTES: { type: 'int', min: 1, max: 1440, default: 15 },
 
   // Which tables and sheets the check looks at
   SOFT_DELETE_COLUMNS: { type: 'list', default: ['is_active', 'rstatus', 'active'] },
@@ -25,16 +37,21 @@ const BAD = Symbol('bad');
 /** What a setting must look like, for error messages. */
 function expected(s, fromJson) {
   if (s.type === 'list') return fromJson ? 'a list of names, like ["a", "b"]' : 'a comma-separated list of names';
+  if (s.type === 'int') return `a whole number from ${s.min} to ${s.max}${fromJson ? ' (no quotes)' : ''}`;
   return fromJson ? 'text in quotes' : 'text';
 }
 
 function fromJson(s, v) {
   if (s.type === 'list') return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.map((x) => x.trim()).filter(Boolean) : BAD;
+  if (s.type === 'int') return Number.isInteger(v) ? v : BAD;
+  if (s.type === 'secret') return typeof v === 'string' ? v : BAD; // passwords may start or end with spaces
   return typeof v === 'string' ? v.trim() : BAD;
 }
 
 function fromText(s, text) {
+  if (s.type === 'secret') return text;
   const t = text.trim();
+  if (s.type === 'int') return /^\d+$/.test(t) ? Number(t) : BAD;
   return s.type === 'list' ? t.split(',').map((x) => x.trim()).filter(Boolean) : t;
 }
 
@@ -61,6 +78,7 @@ function editDistance(a, b) {
 }
 
 function inRange(s, v) {
+  if (s.type === 'int') return v >= s.min && v <= s.max;
   return s.type !== 'string' || v !== '';
 }
 
@@ -103,7 +121,7 @@ function resolveSettings({ env = {}, json = null, dotenv = {}, jsonName = 'confi
     const [raw, where, typed] = hit;
     const v = typed ? fromJson(s, raw) : fromText(s, String(raw));
     if (v === BAD || !inRange(s, v)) {
-      errors.push(`${name} in ${where} must be ${expected(s, typed)}, got ${JSON.stringify(raw)}.`);
+      errors.push(`${name} in ${where} must be ${expected(s, typed)}, got ${s.type === 'secret' ? 'something else' : JSON.stringify(raw)}.`);
       values[name] = s.default;
       sources[name] = 'default';
       continue;

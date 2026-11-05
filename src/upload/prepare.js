@@ -75,7 +75,11 @@ async function loadTolerant(buf) {
     await wb.xlsx.load(buf);
     return wb;
   } catch (e) {
-    if (!/comment|note|vml/i.test(e.message)) throw e;
+    if (!/comment|note|vml/i.test(e.message)) {
+      const err = new Error(`Could not open the file. Is it a real .xlsx that finished saving? (${e.message})`);
+      err.status = 400;
+      throw err;
+    }
   }
   const zip = await JSZip.loadAsync(buf);
   for (const name of Object.keys(zip.files)) {
@@ -273,7 +277,7 @@ async function prepareWorkbook(source, schema, opts = {}) {
       }
     }
   }
-  for (const u of unchecked) add('warning', u.split('.')[0], `${u}: that table is not in this file, so these ids could not be checked. The admin UI will check them on import.`);
+  for (const u of unchecked) add('warning', u.split('.')[0], `${u}: that table is not in this file, so these ids could not be checked. The admin UI will check them on import.`, { code: 'unchecked-link' });
 
   const errors = issues.filter((i) => i.level === 'error');
   const warnings = issues.filter((i) => i.level === 'warning');
@@ -325,6 +329,14 @@ async function prepareWorkbook(source, schema, opts = {}) {
     info,
     tables: [...sheets.values()].map((s) => ({ table: s.t.name, kind: s.t.kind, rows: s.rows.length })),
     dropdowns: lkTables,
+    // The checked values, in database shape (dropdown entries turned into ids), for the admin upload API.
+    data: [...sheets.values()].map((s) => ({
+      sheet: s.ws.name,
+      table: s.t.name,
+      columns: s.cols.map((c) => c.col.name),
+      cellOf: Object.fromEntries(s.cols.map((c) => [c.col.name, colLetter(c.idx)])),
+      rows: s.rows.map((ri) => ({ row: ri.r, values: ri.values || {} })),
+    })),
     buffer: Buffer.from(await wb.xlsx.writeBuffer()),
   };
 }

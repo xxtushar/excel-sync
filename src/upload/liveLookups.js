@@ -28,6 +28,8 @@ const LABEL_COLUMNS = {};
 const COLUMN_SUBSETS = {};
 
 const DASH = ' – ';
+/** Empty dropdown slots kept below today's entries for rows added on a static sheet later. */
+const SPARE_ROWS = 50;
 const quoteSheet = (name) => `'${name.replace(/'/g, "''")}'`;
 
 function colLetter(n) {
@@ -126,8 +128,10 @@ function writeLookupSheet(wb, schema, sheets, blocks, rows, ends) {
         result: e ? e.id : '',
       };
     }
-    // The dropdown is only as long as the entries that exist, so it has no blank lines at the bottom.
-    lists[key] = `OFFSET(${LOOKUP_SHEET}!$${cLabel}$2,0,0,MAX(1,COUNTIF(${LOOKUP_SHEET}!$${cLabel}$2:$${cLabel}$${end},"?*")),1)`;
+    // A plain range, not an OFFSET formula: Numbers, Google Sheets and some Mac Excel versions show no dropdown
+    // for a formula-based list. It covers today's entries plus SPARE_ROWS, so rows added on the static sheet
+    // still appear (the formulas keep the entries packed at the top); run the checker again to grow it.
+    lists[key] = `${LOOKUP_SHEET}!$${cLabel}$2:$${cLabel}$${Math.min(end, entries.length + 1 + SPARE_ROWS)}`;
   });
   return lists;
 }
